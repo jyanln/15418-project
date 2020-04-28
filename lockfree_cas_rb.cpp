@@ -213,6 +213,18 @@ bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
   return true;
 }
 
+bool ApplyMoveUpRule(Node* x, Node* w) {
+  if (((w->marker == w->parent->marker) && (w->marker == w->right->marker) &&
+    (w->marker != 0) && (w->left->marker != 0)) ||
+    ((w->marker == w->right->marker) && (w->marker != 0) && (w->left->marker != 0)) ||
+    ((w->marker == 0) && (w->left->marker != 0) && (w->right->marker != 0))) {
+    return true;
+  }
+  else {
+    false;
+  }
+}
+
 bool SetupLocalAreaForInsert(Node* curr) {
   Node* parentNode = curr->parent;
   if (!CAS(parentNode->flag, false, true)) {
@@ -239,6 +251,140 @@ bool SetupLocalAreaForInsert(Node* curr) {
     return false;
   }
   return true;
+}
+
+bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
+  Node* curr;
+  if (successor->left != nullptr) {
+    curr = successor->left;
+  }
+  else {
+    curr = successor->right;
+  }
+
+  if (!CAS(curr->flag, false, true)) {
+    return false;
+  }
+
+  Node* succParent = successor->parent;
+  if ((succParent != deletedNode) && (!CAS(succParent->flag, false, true))) {
+    curr->flag = false;
+    return false;
+  }
+  if (currParent != successor->parent) {
+    curr->flag = false;
+    return false;
+  }
+
+  Node* siblingNode;
+  if (successor == successor->parent->left) {
+    siblingNode = successor->parent->right;
+  }
+  else {
+    siblingNode = successor->parent->left;
+  }
+
+  Node* leftNieceNode = siblingNode->left;
+  Node* rightNieceNode = siblingNode->right;
+  if (!CAS(siblingNode->flag, false, true)) {
+    curr->flag = false;
+    if (succParent != deletedNode) {
+      succParent->flag = false;
+    }
+    return false;
+  }
+
+  if (siblingNode != nullptr) {
+    if (!CAS(leftNieceNode->flag, false, true)) {
+      curr->flag = siblingNode->flag = false;
+      if (succParent != deletedNode) {
+        succParent->flag = false;
+      }
+      return false;
+    }
+    if (!CAS(rightNieceNode->flag, false, true)) {
+      curr->flag = siblingNode->flag = false;
+      if (succParent != deletedNode) {
+        succParent->flag = false;
+      }
+      return false;
+    }
+  }
+  if (!GetFlagsAndMarkersAbove(succParent, deletedNode)) {
+    curr->flag = siblingNode->flag = leftNieceNode->flag = leftNieceNode->flag = false;
+    if (succParent != deletedNode) {
+      succParent->flag = false;
+    }
+    return false;
+  }
+  return true;
+}
+
+Node* MoveInserterUp(Node* oldNode) {
+  Node* oldParent = oldNode->parent;
+  Node* oldGrandParent = oldParent->parent;
+  Node* oldUncle = nullptr;
+  if (oldParent == oldGrandParent->parent) {
+    oldUncle = oldGrandParent->right;
+  }
+  else {
+    oldUncle = oldGrandParent->left;
+  }
+  while (!GetFlagsAndMarkersAbove(oldgp, 2));
+  Node* newNode = oldGrandParent;
+  Node* newParent = newNode->parent;
+  Node* newGrandParent = newParent->parent;
+  Node* newUncle = nullptr;
+  if (newParent == newGrandParent->left) {
+    newUncle = newGrandParent->right;
+  }
+  else {
+    newUncle = newGrandParent->left;
+  }
+  if (!IsIn(newUncle, moveUPStruct)) {
+    while (!CAS(newUncle->flag, false, true));
+  }
+  ReleaseFlags(moveUpStruct, true, [oldNode, oldParent, oldUncle], 3);
+  return newNode;
+}
+
+Node* MoveDeleterUp(Node* oldNode) {
+  Node* oldParent = oldNode->parent;
+  Node* oldSibling = nullptr;
+  if (oldNode == oldParent->left) {
+    oldSibling = oldParent->right;
+  }
+  else {
+    oldSibling = oldParent->left;
+  }
+  Node* oldLeftNiece = oldSibling->left;
+  Node* oldRightNiece = oldSibling->right;
+
+  while (!GetFlagsAndMarkersAbove(oldGrandParent, 1));
+
+  Node* newNode = oldNode;
+  Node* newParent = newNode->parent;
+  Node* newSibling = nullptr;
+  if (newNode == newParent->left) {
+    newSibling = newParent->right;
+  }
+  else {
+    newSibling = newParent->left;
+  }
+  if (!IsIn(newSibling, moveUpStruct)) {
+    while (!CAS(newSibling->flag, false, true));
+  }
+
+  Node* newLeftNiece = newSibling->left;
+  Node* newRightNiece = newSibling->right;
+  if (!IsIn(newLeftNiece, moveUpStruct)) {
+    while (!CAS(newLeftNiece->flag, false, true));
+  }
+  if (!IsIn(newRightNiece, moveUpStruct)) {
+    while (!CAS(newRightNiece->flag, false, true));
+  }
+  ReleaseFlags(moveUpStruct, true, [oldNode, oldSibling, oldLeftNiece, oldRightNiece], 4);
+  return newNode;
 }
 
 void RedBlackTree::rotateLeft(Node*& root, Node*& curr) {
@@ -293,7 +439,7 @@ void RedBlackTree::fixupInsert(Node*& root, Node*& newNode) {
         grandParentNode->color = false;
         parentNode->color = true;
         uncleNode->color = true;
-        newNode = grandParentNode;
+        newNode = MoveInserterUp(x);
       }
       //otherwise, rotation neceassary
       else {
@@ -339,6 +485,7 @@ void RedBlackTree::fixupInsert(Node*& root, Node*& newNode) {
   root->color = true;
 }
 
+//TODO: figure out restart and goto
 void RedBlackTree::insertNode(const int& value) {
   //restart: prevSearcHNode = nullptr
   Node* prevSearchNode = nullptr;
@@ -386,6 +533,8 @@ void RedBlackTree::insertNode(const int& value) {
 }
 
 void RedBlackTree::fixupDelete(Node* x) {
+  bool done = false;
+  bool didMoveUp = false;
   while (x != root && x->color == true) {
     if (x == x->parent->left) {
       Node* siblingNode = x->parent->right;
@@ -394,23 +543,26 @@ void RedBlackTree::fixupDelete(Node* x) {
         x->parent->color = false;
         rotateLeft(root, x->parent);
         siblingNode = x->parent->right;
+        fixupDeleteCase1(x);
       }
       if (siblingNode->left->color == true && siblingNode->right->color == true) {
         siblingNode->color = red;
-        x = x->parent;
+        x = moveDeleterUP(x);
       }
       else {
         if (siblingNode->right->color == true) {
           siblingNode->left->color = true;
           siblingNode->color = false;
           rotateRight(root, siblingNode);
+          fixupDeleteCase3(x);
           siblingNode = x->parent->right;
         }
         siblingNode->color = x->parent->color;
         x->parent->color = true;
         siblingNode->right->color = true;
         rotateLeft(root, x - parent);
-        x = root;
+        didMoveUp = applyMoveUpRule(x, siblingNode);
+        done = true;
       }
     }
     else {
@@ -420,37 +572,51 @@ void RedBlackTree::fixupDelete(Node* x) {
         x->parent->color = false;
         rotateRight(root, x->parent);
         siblingNode = x->parent->left;
+        fixupDeleteCase1(x);
       }
       if (siblingNode->right->color == true && siblingNode->left > color == true) {
         siblingNode->color = red;
-        x = x->parent;
+        x = moveDeleterUp(x);
       }
       else {
         if (siblingNode->left->color == true) {
           siblingNode->right->color = true;
           siblingNode->color = false;
           rotateLeft(root, siblingNode);
+          fixupDeleteCase3(x);
           siblingNode = x->parent->left;
         }
         siblingNode->color = x->parent->color;
         x->parent->color = true;
         siblingNode->left->color = true;
         rotateRight(root, x - parent);
-        x = root;
+        didMoveUp = applyMoveUpRule(x, siblingNode);
+        done = true;
       }
     }
   }
-  x->color = true;
+  if (!didMoveUP) {
+   x->color = true;
+   //release local area flags and fix relocated markers
+  }
 }
 
-void RedBlackTree::deleteNode(Node* v) {
-  //mtx.lock();
+bool RedBlackTree::deleteNode(Node* v) {
   Node* u;
   if (v->left == nullptr || v->right == nullptr) {
-    u = z;
+    u = v;
   }
   else {
     u = Successor(v);
+  }
+
+  //Setting up local area
+  if (!SetupLocalAreaForDelete(u, v)) {
+    u->flag = false;
+    if (u != v) {
+      v->flag = false;
+    }
+    return false;
   }
 
   Node* siblingNode;
@@ -474,11 +640,15 @@ void RedBlackTree::deleteNode(Node* v) {
   }
   if (u != v) {
     v->value = u->value;
+    v->flag = false;
   }
   if (u->color == true) {
     fixupDelete(siblingNode);
   }
-  return u;
+  else {
+    //release flags and marker held in local area
+  }
+  return true;
 }
 
 Node* RedBlackTree::search(int n) {
