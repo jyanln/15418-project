@@ -1,8 +1,3 @@
-#include <mutex>
-#include <iostream>
-#include <queue>
-
-using namespace std;
 
 //This code is adapted from GeeksForGeeks
 struct Node

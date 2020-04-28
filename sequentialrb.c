@@ -1,10 +1,3 @@
-#include <mutex>
-#include <iostream>
-#include <queue>
-
-using namespace std;
-
-std::mutex mtx;
 
 //This code is adapted from GeeksForGeeks
 struct Node
