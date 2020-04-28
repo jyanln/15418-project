@@ -1,18 +1,42 @@
 #ifndef BENCHMARK_H
 #define BENCHMARK_H
 
-enum OP_TYPE { INSERT, REMOVE, LOOKUP }
+#include <stdio.h>
+#include <stdbool.h>
+#include <pthread.h>
 
 typedef struct {
-    OP_TYPE type;
+    // 0 for insert, 1 for remove, 2 for lookup
+    int type;
+
     int key;
-    int val;
+
+    // Time (in milliseconds) to wait after the operation (simulates work)
+    // Time is randomly generated between the min and max
+    int min_time;
+    int max_time;
 } op_t;
 
-// TODO parses a test from a file
-void parse_test(char* filename, op_t* ops);
+typedef struct {
+    char* filename;
+    int lines;
+    op_t* ops;
+} test_t;
+
+typedef struct {
+    int implementation;
+    test_t* test;
+    double* times;
+    pthread_barrier_t* barrier;
+    void* rbtree;
+} benchmark_args_t;
+
+// Parses a test from a file
+int parse_test(char* filename, test_t* test);
 
 // TODO benchmarks operations and record the times
-void benchmark(int implementation, op_t* ops, double* times);
+void benchmark(int implementation, test_t* test, double* times);
+
+void* benchmark_thread(void* args);
 
 #endif // BENCHMARK_H

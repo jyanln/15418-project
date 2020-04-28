@@ -56,3 +56,6 @@ dkms.conf
 
 # Python caches
 *.pyc
+
+# Binaries
+benchmark

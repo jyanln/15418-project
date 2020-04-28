@@ -1,7 +1,7 @@
 CC=gcc
 
 DEBUG=0
-CFLAGS=-g -O3 -Wall -DDEBUG=$(DEBUG) -std=gnu99
+CFLAGS=-g -O3 -Wall -DDEBUG=$(DEBUG) -std=gnu99 -lpthread
 LDFLAGS= -lm
 
 CFILES = benchmark.c
