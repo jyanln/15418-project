@@ -113,8 +113,8 @@ void ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, i
         nodesToRelease[i]->flag = false;
       }
       else {
-        if (IsGoalNode(nodeToRelease[i], mvstruct)) {
-          //release uneeded flags in mvstruct and discard mvstruct
+        if (IsGoalNode(nd, moveUpStruct)) {
+          //release unneeded flags in mvstruct and discard mvstruct
         }
       }
     }
