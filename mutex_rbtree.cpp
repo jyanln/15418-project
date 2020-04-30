@@ -1,47 +1,12 @@
+#include "mutex_rbtree.hpp"
+
+#include "rbtree.hpp"
+
 #include <mutex>
 #include <iostream>
 #include <queue>
 
-using namespace std;
-
 std::mutex mtx;
-
-//This code is adapted from GeeksForGeeks
-struct Node
-{
-  int value;
-  //Red = False
-  //Black = True
-  bool color;
-  Node* left, * right, * parent;
-
-  Node(int value) {
-    this->value = value;
-    left = right = parent = nullptr;
-    this->color = false;
-  }
-};
-
-class RedBlackTree
-{
-private:
-  Node* root;
-protected:
-  void rotateLeft(Node*&, Node*&);
-  void rotateRight(Node*&, Node*&);
-  void fixColoring(Node*&, Node*&);
-  void fixDoubleBlack(Node* v);
-  void deleteNode(Node* x);
-public:
-  //Constructor
-  RedBlackTree() {
-    root = nullptr;
-  }
-  Node* search(int n);
-  void insertNode(const int& n);
-  void deleteByVal(int n);
-  void printLevelOrder();
-};
 
 Node* BSTReplace(Node* x) {
   if (x->left != nullptr && x->right != nullptr) {
@@ -67,18 +32,18 @@ Node* insertBSTNode(Node* root, Node* newNode) {
   if (root == nullptr) {
     return newNode;
   }
-  if (newNode->value < root->value) {
+  if (newNode->key < root->key) {
     root->left = insertBSTNode(root->left, newNode);
     root->left->parent = root;
   }
-  if (newNode->value > root->value) {
+  if (newNode->key > root->key) {
     root->right = insertBSTNode(root->right, newNode);
     root->right->parent = root;
   }
   return root;
 }
 
-void RedBlackTree::rotateLeft(Node*& root, Node*& curr) {
+void MutexRBTree::rotateLeft(Node*& root, Node*& curr) {
   Node* rightNode = curr->right;
   curr->right = rightNode->left;
   if (curr->right != nullptr) {
@@ -99,7 +64,7 @@ void RedBlackTree::rotateLeft(Node*& root, Node*& curr) {
   curr->parent = rightNode;
 }
 
-void RedBlackTree::rotateRight(Node*& root, Node*& curr) {
+void MutexRBTree::rotateRight(Node*& root, Node*& curr) {
   Node* leftNode = curr->left;
   curr->left = leftNode->right;
   if (curr->left != nullptr) {
@@ -121,7 +86,7 @@ void RedBlackTree::rotateRight(Node*& root, Node*& curr) {
   curr->parent = leftNode;
 }
 
-void RedBlackTree::fixColoring(Node*& root, Node*& newNode) {
+void MutexRBTree::fixColoring(Node*& root, Node*& newNode) {
   Node* parentNode = nullptr;
   Node* grandParentNode = nullptr;
 
@@ -184,16 +149,27 @@ void RedBlackTree::fixColoring(Node*& root, Node*& newNode) {
   root->color = true;
 }
 
-void RedBlackTree::insertNode(const int& value) {
+int MutexRBTree::insert(int key, int val) {
   mtx.lock();
-  Node* newNode = new Node(value);
-  root = insertBSTNode(root, newNode);
-  fixColoring(root, newNode);
-  mtx.unlock();
+  
+  Node* v = search(key);
+  // Update value and return old value
+  if(v && v->key == key) {
+    std::swap(v->val, val);
+    mtx.unlock();
+    return val;
+  } else {
+    Node* newNode = new Node(key, val);
+    root = insertBSTNode(root, newNode);
+    fixColoring(root, newNode);
+
+    mtx.unlock();
+    //TODO return prev value?
+    return -1;
+  }
 }
 
-void RedBlackTree::deleteNode(Node* v) {
-  //mtx.lock();
+void MutexRBTree::deleteNode(Node* v) {
   Node* u = BSTReplace(v);
 
   // True when u and v are both black
@@ -242,8 +218,8 @@ void RedBlackTree::deleteNode(Node* v) {
   if (v->left == nullptr || v->right == nullptr) {
     // v has 1 child
     if (v == root) {
-      // v is root, assign the value of u to v, and delete u
-      v->value = u->value;
+      // v is root, assign the key of u to v, and delete u
+      v->key = u->key;
       v->left = v->right = nullptr;
       delete u;
     }
@@ -269,15 +245,14 @@ void RedBlackTree::deleteNode(Node* v) {
     return;
   }
 
-  // v has 2 children, swap values with successor and recurse
-  int tempVal = u->value;
-  u->value = v->value;
-  v->value = tempVal;
+  // v has 2 children, swap keys with successor and recurse
+  int tempVal = u->key;
+  u->key = v->key;
+  v->key = tempVal;
   deleteNode(u);
-  //mtx.unlock();
 }
 
-void RedBlackTree::fixDoubleBlack(Node* x) {
+void MutexRBTree::fixDoubleBlack(Node* x) {
   if (x->parent == nullptr)
     // Reached root
     return;
@@ -310,8 +285,8 @@ void RedBlackTree::fixDoubleBlack(Node* x) {
     }
     else {
       // Sibling black
-      if (siblingNode->left != nullptr && siblingNode->left->color == false ||
-        siblingNode->right != nullptr && siblingNode->right->color == false) {
+      if ((siblingNode->left != nullptr && siblingNode->left->color == false) ||
+        (siblingNode->right != nullptr && siblingNode->right->color == false)) {
         // at least 1 red children
         if (siblingNode->left != nullptr && siblingNode->left->color == false) {
           if (siblingNode->parent->left == siblingNode) {
@@ -355,16 +330,16 @@ void RedBlackTree::fixDoubleBlack(Node* x) {
   }
 }
 
-Node* RedBlackTree::search(int n) {
+Node* MutexRBTree::search(int n) {
   Node* temp = root;
   while (temp != NULL) {
-    if (n < temp->value) {
+    if (n < temp->key) {
       if (temp->left == NULL)
         break;
       else
         temp = temp->left;
     }  
-    else if (n == temp->value) {
+    else if (n == temp->key) {
       break;
     }
     else {
@@ -378,26 +353,50 @@ Node* RedBlackTree::search(int n) {
   return temp;
 }
 
-// utility function that deletes the node with given value 
-void RedBlackTree::deleteByVal(int n) {
-  if (root == NULL)
-    // Tree is empty 
-    return;
-
-  Node* v = search(n);
-
-  if (v->value != n) {
-    cout << "No node found to delete with value:" << n << endl;
-    return;
-  }
+// utility function that deletes the node with given key 
+int MutexRBTree::remove(int key) {
   mtx.lock();
 
-
-  deleteNode(v);
-  mtx.unlock();
+  if (root == NULL) {
+    // Tree is empty 
+    mtx.unlock();
+    return -1;
   }
 
-void RedBlackTree::printLevelOrder() {
+  Node* v = search(key);
+
+  if (v->key != key) {
+    mtx.unlock();
+    return -1;
+  }
+
+  int ret = v->val;
+  deleteNode(v);
+
+  mtx.unlock();
+  return ret;
+}
+
+int MutexRBTree::lookup(int key) {
+  mtx.lock();
+  if (root == NULL) {
+    // Tree is empty 
+    mtx.unlock();
+    return -1;
+  }
+
+  Node* v = search(key);
+
+  if (v && v->key == key) {
+    mtx.unlock();
+    return v->val;
+  } else {
+    mtx.unlock();
+    return -1;
+  }
+}
+
+void MutexRBTree::printLevelOrder() {
   if (root == NULL)
     return;
 
@@ -408,10 +407,10 @@ void RedBlackTree::printLevelOrder() {
   {
     Node* temp = q.front();
     if (temp->color) {
-      cout << temp->value << "(BLACK)  ";
+        std::cout << temp->key << "(BLACK)  ";
     }
     else {
-      cout << temp->value << "(RED)  ";
+        std::cout << temp->key << "(RED)  ";
     }
     q.pop();
 
@@ -421,38 +420,4 @@ void RedBlackTree::printLevelOrder() {
     if (temp->right != NULL)
       q.push(temp->right);
   }
-}
-
-int main()
-{
-  RedBlackTree test1;
-
-  cout << "Test 1 : Insertion and Deletion \n";
-
-  test1.insertNode(1);
-  test1.insertNode(2);
-  test1.insertNode(3);
-  test1.printLevelOrder();
-  cout << "\n";
-  test1.deleteByVal(1);
-  test1.deleteByVal(2);
-  test1.deleteByVal(3);
-  test1.printLevelOrder();
-  cout << "\n";
-
-  RedBlackTree test2;
-
-  cout << "\nTest 2 : Deleting Non Existing Values \n";
-  test2.insertNode(7);
-  test2.insertNode(6);
-  test2.insertNode(9);
-  test2.insertNode(4);
-  test2.printLevelOrder();
-  cout << "\n";
-  test2.deleteByVal(4);
-  test2.deleteByVal(7);
-  test2.deleteByVal(9);
-  test2.deleteByVal(4);
-  test2.deleteByVal(6);
-  test2.printLevelOrder();
 }

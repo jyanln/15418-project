@@ -4,7 +4,7 @@ DEBUG=0
 CFLAGS=-g -O3 -Wall -DDEBUG=$(DEBUG) -std=c++11 -lpthread
 LDFLAGS= -lm
 
-CPPFILES = benchmark.cpp
+CPPFILES = mutex_rbtree.cpp benchmark.cpp
 HFILES = benchmark.hpp rbtree.hpp
 
 all: benchmark

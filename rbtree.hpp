@@ -4,7 +4,6 @@
 #include <string>
 
 // Function signatures for red black tree implementations
-template <typename T>
 class RBTree {
     public:
         RBTree() {}
@@ -17,17 +16,17 @@ class RBTree {
          *  Inserts a value at a specific key in the tree. If a value is already
          *  present, the function replaces and returns the old value.
          */
-        virtual T insert(int key, T val) = 0;
+        virtual int insert(int key, int val) = 0;
 
         /**
          *  Removes and returns a value at a specific key in the tree.
          */
-        virtual T remove(int key) = 0;
+        virtual int remove(int key) = 0;
 
         /**
          *  Returns the value at a specific key in the tree without removing it.
          */
-        virtual T lookup(int key) = 0;
+        virtual int lookup(int key) = 0;
 };
 
 //TODO

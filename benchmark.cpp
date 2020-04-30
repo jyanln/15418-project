@@ -1,6 +1,7 @@
 #include "benchmark.hpp"
 
 #include "rbtree.hpp"
+#include "mutex_rbtree.hpp"
 
 #include <thread>
 #include <chrono>
@@ -22,7 +23,7 @@ bool synced = false;
 int main(int argc, char* argv[]) {
     // Parse arguments
     char c;
-    while((c = getopt(argc, argv, "crt")) != -1) {
+    while((c = getopt(argc, argv, "crt:")) != -1) {
         switch(c) {
             case 'c':
                 correctness = true;
@@ -104,9 +105,10 @@ int main(int argc, char* argv[]) {
         std::string rb_names[NUM_RB_IMPL];
         double times[NUM_RB_IMPL * 6];
         for(int impl = 0; impl < NUM_RB_IMPL; impl++) {
-            RBTree<int> tree = SimpleRBTree<int>();
+            //TODO choose which type of tree
+            RBTree* tree = new MutexRBTree();
 
-            rb_names[impl] = tree.name();
+            rb_names[impl] = tree->name();
 
             benchmark(tree, tests[i], &times[impl * 6]);
         }
@@ -114,7 +116,7 @@ int main(int argc, char* argv[]) {
         // Print results
         printf("Implementation\tAvg insert\tWorst insert\tAvg remove\tWorst remove\tAvg lookup\tWorst lookup\n");
         for(int impl = 0; impl < NUM_RB_IMPL; impl++) {
-            printf("%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n",
+            printf("%s\t%.2f\t\t%.2f\t\t%.2f\t\t%.2f\t\t%.2f\t\t%.2f\n",
                     rb_names[impl].c_str(),
                     times[impl * 6],
                     times[impl * 6 + 1],
@@ -128,7 +130,7 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-void benchmark(RBTree<int>& rbtree, const Test& test, double* times) {
+void benchmark(RBTree* rbtree, const Test& test, double* times) {
     std::vector<std::thread> threads;
     double thread_times[num_threads * 3];
 
@@ -163,7 +165,7 @@ void benchmark(RBTree<int>& rbtree, const Test& test, double* times) {
     }
 }
 
-void benchmark_thread(RBTree<int>& tree, const Test& test, double* times) {
+void benchmark_thread(RBTree* tree, const Test& test, double* times) {
     // Data to calculate average
     int num[3] = {0, 0, 0};
     double avg[3] = {0, 0, 0};
@@ -173,20 +175,20 @@ void benchmark_thread(RBTree<int>& tree, const Test& test, double* times) {
 
         switch(op.type) {
             case 0:
-                tree.insert(op.key, 0);
+                tree->insert(op.key, 0);
                 break;
             case 1:
-                tree.remove(op.key);
+                tree->remove(op.key);
                 break;
             case 2:
-                tree.lookup(op.key);
+                tree->lookup(op.key);
                 break;
         }
         
         auto end = std::chrono::steady_clock::now();
         // Time in milliseconds
         double time =
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+            std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
         // Update stats
         num[op.type]++;
@@ -194,8 +196,9 @@ void benchmark_thread(RBTree<int>& tree, const Test& test, double* times) {
 
 
         // Sleep for a random amount of time
-        int sleep_time = rand() % (op.max_time - op.min_time) + op.min_time;
-        std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
+        int sleep_time = op.max_time == op.min_time ? op.min_time :
+            rand() % (op.max_time - op.min_time) + op.min_time;
+        std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
     }
 
     // Record average

@@ -38,19 +38,24 @@ class Test {
             int lines;
             file >> lines;
 
-            ops(lines);
+            ops.resize(lines);
 
             // Parse each line
             for(int i = 0; i < lines; i++) {
                 file >> ops[i].type >> ops[i].key >> ops[i].min_time >>
                     ops[i].max_time;
+
+                // Check correctness
+                if(ops[i].type < 0 || ops[i].type > 2 ||
+                        ops[i].max_time < ops[i].min_time) {
+                    throw -2;
+                }
             }
         }
 };
 
-// TODO template?
-void benchmark(RBTree<int>& tree, const Test& test, double* times);
+void benchmark(RBTree* tree, const Test& test, double* times);
 
-void benchmark_thread(RBTree<int>& tree, const Test& test, double* times);
+void benchmark_thread(RBTree* tree, const Test& test, double* times);
 
 #endif // BENCHMARK_H
