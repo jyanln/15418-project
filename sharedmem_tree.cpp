@@ -1,7 +1,6 @@
 
 using namespace std;
 
-//This code is adapted from GeeksForGeeks
 struct opInfo {
   short status;
   void* nextLocation;
@@ -324,7 +323,7 @@ void injectOperation(opRecord opData) {
   }
 }
 
-executeWindowTransaction(pNode* pNode, dNode* dNode) {
+void executeWindowTransaction(pNode* pNode, dNode* dNode) {
   opRecord* opData = dNode->opData;
   int flag = pNode->flag;
   dNode* dCurrent = pNode->dataNode;
@@ -349,19 +348,113 @@ executeWindowTransaction(pNode* pNode, dNode* dNode) {
         dNode* dWindowRoot = address of data node now acting as window;
         if (laster / terminal window transaction) {
           status = COMPLETED;
-          ...add more
+          pNode* pMoveTo;
+          if (update operation) {
+            pMoveTo->dataNode = address of record containing update value;
+          }
+          else {
+            pMoveTo->dataNode = nullptr;
+          }
         }
+        else {
+          status = IN_PROGRESS;
+          pNode* pMoveTo = address of pointer in windowSoFar that op will move;
+          pMoveTo->flag = OWNED;
+          dNode* dMoveTo = pMoveTo->dNode;
+          dMoveTo->opData = opData;
+        }
+        dWindowRoot->opData = opData;
+        dWindowRoot->next->status = status;
+        dWindowRoot->next->nextLocation = pMoveTo;
+        //double compare and swap here
+        CAS(pNode, (OWNED < dCurrent), (FREE, dWindowRoot));
       }
+    }
+    dNode* dNow = pNode->dNode;
+    if (dNow->opData == opData) {
+      CAS(opData->state, (IN_PROGRESS, pNode), dNow->next);
     }
   }
 }
 
 bool executeCheapWindowTransaction(pNode* pNode, dNode* dNode) {
-  blah
+  opRecord* opData = dNode->opData;
+  int pid = opData->pid;
+  while (traversal not complete) {
+    pNode* pNextToVisit = address of next pointer node to be visited;
+    dNode* dNextToVisit = pNextToVisit->dNode;
+    if (opData->status->postion != pNode) {
+      return True;
+    }
+    if (dNextToVisit->opData != nullptr) {
+      if (dNextToVisit->opData->pid != pid) {
+        executeWindowTransaction(pNextToVisit, dNextToVisit);
+        dNextToVisit = pNextToVisit->dNode;
+        if (opData->state->position != pNode) {
+          return true;
+        }
+      }
+      else if (dNextToVisit->opData == dNode->opData) {
+        if (opData->state->position == pNode) {
+          slideWindowDown(pNode, dNode, pNextToVisit, dNextToVisit);
+        }
+        return tre;
+      }
+      // need Memory table
+      else if (MT[pid] != opData) {
+        return true;
+      }
+      //no idea what this mans
+      visit dNextToVisit;
+    }
+  }
+  if (no transofrmation needed) {
+    if (last terminal window transaction) {
+      pNode* pMoveTo;
+      if (update operation) {
+        pMoveTo->dataNode = address of record containing update value;
+      }
+      else {
+        pMoveTo->dataNode = nullptr;
+      }
+      dNode* dMoveTo = nullptr;
+    }
+    else {
+      pNode* pMoveTo = address of the pointer we are moving to;
+      dNode* dMoveTo = pMoveTo->dNode;
+    }
+    if (opData->state->position == pNode) {
+      slideWindowDown(pNode, dNode, pMoveTo, dMoveTo);
+    }
+    return true;
+  }
+  else {
+    return false;
+  }
 }
 
-void slideWindowDown(pNode) {
-  blah
+void slideWindowDown(pNode* pMoveFrom, dNode* dMoveFrom, pNode* pMoveTo, dNode* dMoveTo) {
+  opRecord* opData = dMoveFrom->opData;
+  //copy the data node of the current window location
+  dNode* dCopyMoveFrom = clone(dMoveFrom);
+  dCopyMoveFrom->opData = opData;
+  if (dMoveTo !+ nullptr) {
+    dCopyMoveFrom->next->status = IN_PROGRESS;
+    dCopyMoveFrom->next->nextLocation = pMoveTo;
+  }
+  else {
+    dCopyMoveFrom->next->status = COMPLETED;
+    dCopyMoveFrom->next->nextLocation = pMoveTo;
+  }
+  if (dMoveTo != nullptr) {
+    if (dMoveTo->opData != opData) {
+      dNode* dCopyMoveTo = clone(dMoveTo);
+      dCopyMoveTo->opData = opData;
+      CAS(pMoveTo, (FREE, dMoveTo), (OWNED, dCopyMoveTo));
+    }
+  }
+  CAS(pMoveFrom, (OWNED, dMoveFrom), (FREE, dCopyMoveFrom));
+  CAS(opData->state, (IN_PROGRESS, pMoveFrom), (dCopyMoveFrom->next));
 }
 
 /*
