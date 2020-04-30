@@ -1,16 +1,16 @@
-CC=gcc
+CC=g++
 
 DEBUG=0
-CFLAGS=-g -O3 -Wall -DDEBUG=$(DEBUG) -std=gnu99 -lpthread
+CFLAGS=-g -O3 -Wall -DDEBUG=$(DEBUG) -std=c++11 -lpthread
 LDFLAGS= -lm
 
-CFILES = benchmark.c
-HFILES = benchmark.h rbtree.h
+CPPFILES = benchmark.cpp
+HFILES = benchmark.hpp rbtree.hpp
 
 all: benchmark
 
-benchmark: $(CFILES) $(HFILES)
-	$(CC) $(CFLAGS) -o benchmark $(CFILES) $(LDFLAGS)
+benchmark: $(CPPFILES) $(HFILES)
+	$(CC) $(CFLAGS) -o benchmark $(CPPFILES) $(LDFLAGS)
 
 clean:
 	rm -f benchmark
