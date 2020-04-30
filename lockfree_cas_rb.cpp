@@ -78,6 +78,7 @@ Node* Successor(Node* x) {
 //      Check correctness
 
 
+
 /*
 To Fix: 
 1) On initialization empty tree should have:
@@ -98,12 +99,15 @@ To Fix:
       moveupstruct contains a goal node which identifies which, when reached, allows another process ot move up
       Also done by release flags
 
+4) Write IsIn and IsGoalNode and FixupCase1 and FixupCase3
+
 
 */
 
 //this entire function is a mess
-int ReleaseFlags(moveUpStruct* mvstruct, bool success, Node** nodesToRelease, int numNodes) {
-  for (int i = 0; i < numNodes; i++) {
+
+void ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, int numNodes) {
+  for (int i = 0; i < numNodes, i++) {
     if (success) {
       if (!IsIn(nodesToRelease[i], mvstruct)) {
         nodesToRelease[i]->flag = false;
@@ -598,6 +602,20 @@ void RedBlackTree::insertNode(const int& value) {
   fixupInsert(root, newNode);
 }
 
+void fixupDeleteCase1(Node* x) {
+
+}
+
+void fixupDeleteCase3(Node* x) {
+
+}
+void fixupDeleteCase1_sym(Node* x) {
+
+}
+
+void fixupDeleteCase3_sym(Node* x) {
+
+}
 void RedBlackTree::fixupDelete(Node* x) {
   bool done = false;
   bool didMoveUp = false;
@@ -609,18 +627,18 @@ void RedBlackTree::fixupDelete(Node* x) {
         x->parent->color = false;
         rotateLeft(root, x->parent);
         siblingNode = x->parent->right;
-        fixupDeleteCase1(x);
+        fixupDeleteCase1(x, siblingNode);
       }
       if (siblingNode->left->color == true && siblingNode->right->color == true) {
         siblingNode->color = red;
-        x = moveDeleterUP(x);
+        x = MoveDeleterUp(x);
       }
       else {
         if (siblingNode->right->color == true) {
           siblingNode->left->color = true;
           siblingNode->color = false;
           rotateRight(root, siblingNode);
-          fixupDeleteCase3(x);
+          fixupDeleteCase3(x, siblingNode);
           siblingNode = x->parent->right;
         }
         siblingNode->color = x->parent->color;
@@ -638,25 +656,25 @@ void RedBlackTree::fixupDelete(Node* x) {
         x->parent->color = false;
         rotateRight(root, x->parent);
         siblingNode = x->parent->left;
-        fixupDeleteCase1(x);
+        fixupDeleteCase1_sym(x, siblingNode);
       }
       if (siblingNode->right->color == true && siblingNode->left > color == true) {
         siblingNode->color = red;
-        x = moveDeleterUp(x);
+        x = MoveDeleterUp(x);
       }
       else {
         if (siblingNode->left->color == true) {
           siblingNode->right->color = true;
           siblingNode->color = false;
           rotateLeft(root, siblingNode);
-          fixupDeleteCase3(x);
+          fixupDeleteCase3_sym(x, siblingNode);
           siblingNode = x->parent->left;
         }
         siblingNode->color = x->parent->color;
         x->parent->color = true;
         siblingNode->left->color = true;
         rotateRight(root, x - parent);
-        didMoveUp = applyMoveUpRule(x, siblingNode);
+        didMoveUp = ApplyMoveUpRule(x, siblingNode);
         done = true;
       }
     }
