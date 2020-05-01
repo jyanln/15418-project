@@ -1,6 +1,13 @@
 
 using namespace std;
 
+/*
+TODOS for data structures:
+  figure out if our RB tree wants keys and values or just values (either changed locked and CAS or change this)
+  figure out how to put pNode and opInfo in a single word.
+  figure out what opInfo's next location's pointer type should be
+*/
+
 struct opInfo {
   short status;
   void* nextLocation;
@@ -23,7 +30,7 @@ struct dNode
   int key;
   vRecord* valData;
   opRecord* opData;
-  Node* left, * right, * parent;
+  pNode* left, * right;
   opInfo* next;
 
   dNode(int key, int value) {
@@ -73,153 +80,43 @@ Tables Needed:
 
 */
 
+opRecord** modifyTable = calloc(nthreads, sizeof(opRecord*));
+opRecord** searchTable = calloc(nthreads, sizeof(opRecord*));
 
 class RedBlackTree
 {
 private:
-  Node* root;
+  pNode* root;
 protected:
-  void rotateLeft(Node*&, Node*&);
-  void rotateRight(Node*&, Node*&);
-  void fixColoring(Node*&, Node*&);
-  void fixDoubleBlack(Node* v);
+  void executeOperation(opRecord* opData);
+  void injectOperation(opRecord* opData);
+  void executeWindowTransaction(pNode* pointNode, dNode* dataNode);
+  void executeCheapWindowTransaction(pNode* pointNode, dNode* dataNode);
+  void slideWindowDown(pNode* pMoveFrom, dNode* dMoveFrom, pNode* pMoveTo, dNode* dMoveTo);
+
 public:
   //Constructor
   RedBlackTree() {
     root = nullptr;
   }
-  void insertNode(const int& n);
-  void deleteNode(Node* x);
+  int search(int key);
+  int insertOrUpdate(int key, int value);
+  int deleteNode(int key);
+  void traverse(opRecord* opData);
 };
 
-//insert new node with given key in BST
-Node* insertBSTNode(dNode* root, dNode* newNode) {
-  if (root == nullptr) {
-    return newNode;
-  }
-
-  if (newNode->value < root->value) {
-    root->left = insertBSTNode(root->left, newNode);
-    root->left->parent = root;
-  }
-
-  if (newNode->value > root->value) {
-    root->right = insertBSTNode(root->right, newNode);
-    root->right->parent = root;
-  }
-
-  return root;
-}
 /*
-void RedBlackTree::rotateLeft(dNode*& root, dNode*& curr) {
-  Node* rightNode = curr->right;
-  curr->right = rightNode->left;
-  if (curr->right != nullptr) {
-    root = rightNode;
-  }
-  else if (curr == curr->parent->left) {
-    curr->parent->left = rightNode;
-  }
-  else {
-    curr->parent->right = rightNode;
-  }
-  rightNode->left = curr;
-  curr->parent = rightNode;
-}
-
-void RedBlackTree::rotateRight(dNode*& root, dNode*& curr) {
-  Node* leftNode = curr->left;
-  curr->left = leftNode->right;
-  if (curr->left != nullptr) {
-    root = leftNode;
-  }
-  else if (curr == curr->parent->right) {
-    curr->parent->right = leftNode;
-  }
-  else {
-    curr->parent->left = leftNode;
-  }
-  leftNode->right = curr;
-  curr->parent = leftNode;
-}
-
-void RedBlackTree::fixColoring(dNode*& root, dNode*& newNode) {
-  Node* parentNode = nullptr;
-  Node* grandParentNode = nullptr;
-
-  while ((newNode != root) && (newNode->color != true) &&
-    (newNode->parent->color == false)) {
-    parentNode = newNode->parent;
-    grandParentNode = parentNode->parent;
-
-    if (parentNode == grandParentNode->left) {
-      Node* uncleNode = parentNode->right;
-
-      //If uncle is red, then recolor
-      if (uncleNode != nullptr && uncleNode->color == false) {
-        grandParentNode->color = false;
-        parentNode->color = true;
-        uncleNode->color = true;
-        newNode = grandParentNode;
-      }
-      //otherwise, rotation neceassary
-      else {
-        if (newNode == parentNode->right) {
-          rotateLeft(root, parentNode);
-          newNode = parentNode;
-          parentNode = newNode->parent;
-        }
-
-        rotateRight(root, parentNode);
-        bool tempColor = parentNode->color;
-        parentNode->color = grandParentNode->color;
-        grandParentNode->color = tempColor;
-        newNode = parentNode;
-      }
-    }
-    else {
-      Node* uncleNode = parentNode->left;
-
-      //If uncle is red, then recolor
-      if (uncleNode != nullptr && uncleNode->color == false) {
-        grandParentNode->color = false;
-        parentNode->color = true;
-        uncleNode->color = true;
-        newNode = grandParentNode;
-      }
-      //otherwise, rotation is necesary
-      else {
-        if (newNode == parentNode->left) {
-          rotateRight(root, parentNode);
-          newNode = parentNode;
-          parentNode = newNode->parent;
-        }
-
-        rotateLeft(root, parentNode);
-        bool tempColor = parentNode->color;
-        parentNode->color = grandParentNode->color;
-        grandParentNode->color = tempColor;
-        newNode = parentNode;
-      }
-    }
-  }
-}
-
-void RedBlackTree::insertNode(const int& value) {
-  mtx.lock();
-  Node* newNode = new Node(value);
-  root = insertBSTNode(root, newNode);
-  fixColoring(root, newNode);
-  mtx.unlock();
-}
+TODO:
+  Change myid to current pid
+  Read value using Chuong et al's algorithm and return it
 */
-int search(int key) {
+int RedBlackTree::search(int key) {
   //TODO: figure out what myid is
   int myid = 0;
   opRecord* operations = new opRecord(SEARCH, key, -1);
   operations->state->status = IN_PROGRESS;
   operations->state->position = nullptr;
-  searchT[myid] = operations;
+  searchTable[myid] = operations;
   traverse(operations);
   if (opData->state->position != nullptr) {
     //read the value stored in teh record using Chuong et al's algorithm and return it
@@ -227,10 +124,16 @@ int search(int key) {
   }
 }
 
-void insertOrUpdate(int key, int value) {
+/*
+ TODO:
+  Change pid to the process selected using round robin (need to implement round robin)
+    store previous picked and add 1?
+  Update value using Chuong et al's algorithm
+*/
+void RedBlackTree::insertOrUpdate(int key, int value) {
   int* valData = nullptr;
   search(key);
-  valData = searchT[myid]->state->position;
+  valData = searchTable[myid]->state->position;
   if (valData == nullptr) {
     int pid = 0; // the process selected to help in RR
     opRecord* opData = new opRecord(INSERT, key, value);
@@ -245,7 +148,12 @@ void insertOrUpdate(int key, int value) {
   }
 }
 
-void deleteNode(int key) {
+/*
+TODO:
+  Change pid to the process selected using round robin
+  Figure out how to delete using MTL-framework
+*/
+void RedBlackTree::deleteNode(int key) {
   //phase 1: determine if the key already exists
   if (search(key)) {
     //phase 2: delete using MTL-framework
@@ -260,17 +168,20 @@ void deleteNode(int key) {
   }
 }
 
-void traverse(opRecord* opData) {
-  dNode* dCurrent = root->dNode;
+/*
+  should be fine
+*/
+void RedBlackTree::traverse(opRecord* opData) {
+  dNode* dCurrent = root->dataNode;
   while (dCurrent != null) {
     if (opData->state->status == COMPLETED) {
       return;
     }
     if (opData->key < dCurrent->key) {
-      dCurrent = dCurrent->left->dNode;
+      dCurrent = dCurrent->left->dataNode;
     }
     else {
-      dCurrent = dCurrent->right->dNode;
+      dCurrent = dCurrent->right->dataNode;
     }
   }
   if (dCurrent->key = opData->key) {
@@ -283,10 +194,15 @@ void traverse(opRecord* opData) {
   }
 }
 
-void executeOperation(opRecord opData) {
+/*
+TODO:
+  select pid in RR
+  also figure out root (use RB TREE STRUCT?)
+*/
+void RedBlackTree::executeOperation(opRecord* opData) {
   opData->state->status = WAITING;
   opData->state->position = root;
-  movementTable[myid] = opData;
+  modifyTable[myid] = opData;
 
   //select a modify operation to help later
   int pid = 0; //select in round robin manner
@@ -309,9 +225,12 @@ void executeOperation(opRecord opData) {
   }
 }
 
-void injectOperation(opRecord opData) {
+/*
+  figure out root
+*/
+void RedBlackTree::injectOperation(opRecord* opData) {
   while (opData->state->status == WAITING) {
-    dNode* dRoot = root->dNode;
+    dNode* dRoot = root->dataNode;
     if (dRoot->opData!= nullptr) {
       executeWindowTransaction(root, dRoot);
     }
@@ -323,17 +242,27 @@ void injectOperation(opRecord opData) {
   }
 }
 
-void executeWindowTransaction(pNode* pNode, dNode* dNode) {
-  opRecord* opData = dNode->opData;
-  int flag = pNode->flag;
-  dNode* dCurrent = pNode->dataNode;
+/*
+TODO:
+  a lot of pseudo code in this point
+  figure out when there are more nodes to add (373)
+  figure out the address of the enxt node to be copied
+  figure out address of data now acting as window
+  figure out when it is the last window transaction (when we have reached leaf node)
+  figure out when it is an update operation 
+  figure out what addres it will move to
+*/
+void RedBlackTree::executeWindowTransaction(pNode* pointNode, dNode* dataNode) {
+  opRecord* opData = dataNode->opData;
+  int flag = pointNode->flag;
+  dNode* dCurrent = pointNode->dataNode;
   if (dCurrent->opData) {
     if (flag == OWNED) {
-      if (pNode == pRoot) {
+      if (pointNode == root) {
         //the operation may have just been injected but op state may not have been updated yet
         //CAS switch
       }
-      if (!exchangeCheapWindowTransaction(pNode, dCurrent)) {
+      if (!exchangeCheapWindowTransaction(pointNode, dCurrent)) {
         dNode* windowSoFar = copy(dCurrent);
         while (more nodes to add) {
           pNode* pNextToAdd = address of the ponter node of the next tree node to be copied;
@@ -377,31 +306,40 @@ void executeWindowTransaction(pNode* pNode, dNode* dNode) {
   }
 }
 
-bool executeCheapWindowTransaction(pNode* pNode, dNode* dNode) {
-  opRecord* opData = dNode->opData;
+/*
+TODO:
+  a lot of pseudo code here too
+  figure out when traversal not complete
+  figure out address of next pointer node
+  figure out how to visit dNextToVisit
+  figure out when no transformation is needed
+    or last terminal window transaction
+
+*/
+bool RedBlackTree::executeCheapWindowTransaction(pNode* pointNode, dNode* dataNode) {
+  opRecord* opData = dataNode->opData;
   int pid = opData->pid;
   while (traversal not complete) {
     pNode* pNextToVisit = address of next pointer node to be visited;
     dNode* dNextToVisit = pNextToVisit->dNode;
-    if (opData->status->postion != pNode) {
+    if (opData->status->postion != pointNode) {
       return True;
     }
     if (dNextToVisit->opData != nullptr) {
       if (dNextToVisit->opData->pid != pid) {
         executeWindowTransaction(pNextToVisit, dNextToVisit);
         dNextToVisit = pNextToVisit->dNode;
-        if (opData->state->position != pNode) {
+        if (opData->state->position != pointNode) {
           return true;
         }
       }
-      else if (dNextToVisit->opData == dNode->opData) {
-        if (opData->state->position == pNode) {
-          slideWindowDown(pNode, dNode, pNextToVisit, dNextToVisit);
+      else if (dNextToVisit->opData == dataNode->opData) {
+        if (opData->state->position == pointNode) {
+          slideWindowDown(pointNode, dataNode, pNextToVisit, dNextToVisit);
         }
-        return tre;
+        return true;
       }
-      // need Memory table
-      else if (MT[pid] != opData) {
+      else if (modifyTable[pid] != opData) {
         return true;
       }
       //no idea what this mans
@@ -409,19 +347,20 @@ bool executeCheapWindowTransaction(pNode* pNode, dNode* dNode) {
     }
   }
   if (no transofrmation needed) {
+    pNode* pMoveTo = nullptr;
+    dNode* dMoveTo = nullptr;
     if (last terminal window transaction) {
-      pNode* pMoveTo;
       if (update operation) {
         pMoveTo->dataNode = address of record containing update value;
       }
       else {
         pMoveTo->dataNode = nullptr;
       }
-      dNode* dMoveTo = nullptr;
+      dMoveTo = nullptr;
     }
     else {
-      pNode* pMoveTo = address of the pointer we are moving to;
-      dNode* dMoveTo = pMoveTo->dNode;
+      pMoveTo = address of the pointer we are moving to;
+      dMoveTo = pMoveTo->dNode;
     }
     if (opData->state->position == pNode) {
       slideWindowDown(pNode, dNode, pMoveTo, dMoveTo);
@@ -433,7 +372,14 @@ bool executeCheapWindowTransaction(pNode* pNode, dNode* dNode) {
   }
 }
 
-void slideWindowDown(pNode* pMoveFrom, dNode* dMoveFrom, pNode* pMoveTo, dNode* dMoveTo) {
+/*
+  TODO:
+    find out clone
+    fix CAS 
+    figure out how to put pNodes in one word
+    figure out how to put state in one word
+*/
+void RedBlackTree::slideWindowDown(pNode* pMoveFrom, dNode* dMoveFrom, pNode* pMoveTo, dNode* dMoveTo) {
   opRecord* opData = dMoveFrom->opData;
   //copy the data node of the current window location
   dNode* dCopyMoveFrom = clone(dMoveFrom);
