@@ -38,6 +38,22 @@ To Fix:
 */
 
 //helper functions
+thread_local MoveUpStruct* mvstruct = new MoveUpStruct();
+thread_local long myPID;
+
+void threadInit(long i) {
+  myPID = i;
+}
+
+void clearMoveUpStruct() {
+  if (mvstruct->nodeList.size() == 0) {
+    return;
+  }
+  for (int i = 0; i < mvstruct->nodeList.size(); i++) {
+    mvstruct->nodeList[i]-> flag = false;
+  }
+  mvstruct->nodeList.clear();
+}
 
 Node* Successor(Node* x) {
   if (x->left != nullptr && x->right != nullptr) {
@@ -72,7 +88,6 @@ bool IsGoalNode(Node* curr, MoveUpStruct* mvstruct) {
   return (curr == mvstruct->goalNode);
 }
 
-//figure out how to release unneeded flags
 void ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, int numNodes) {
   for (int i = 0; i < numNodes, i++) {
     if (success) {
@@ -82,6 +97,7 @@ void ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, i
       else {
         if (IsGoalNode(nd, mvstruct)) {
           //release unneeded flags in mvstruct and discard mvstruct
+          clearMoveUpStruct();
         }
       }
     }
@@ -93,8 +109,7 @@ void ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, i
   }
 }
 
-//figure out where mvstruct comes from
-bool SpacingRuleIsSatisfied(Node* curr, Node* start, int PIDtoIgnore) {
+bool SpacingRuleIsSatisfied(Node* curr, Node* start, MoveUpStruct* mvstruct) {
   if (curr != start) {
     if (curr->marker != 0) {
       return false;
@@ -130,7 +145,7 @@ bool SpacingRuleIsSatisfied(Node* curr, Node* start, int PIDtoIgnore) {
     }
     return false;
   }
-  if ((siblingNode->marker != 0) && (siblingNode->marker != PIDtoIgnore)){
+  if ((siblingNode->marker != 0)){
     Node* releaseList[1] = { siblingNode };
     ReleaseFlags(mvstruct, false, releaseList, 1);
     if (parentNode != curr) {
@@ -148,7 +163,6 @@ bool SpacingRuleIsSatisfied(Node* curr, Node* start, int PIDtoIgnore) {
   return true;
 }
 
-//looks good
 bool GetFlagsForMarkers(Node* start, MoveUpStruct* mvstruct, Node* pos1, Node* pos2, Node* pos3, Node* pos4) {
   pos1 = start->parent;
   bool expected = false;
@@ -172,7 +186,8 @@ bool GetFlagsForMarkers(Node* start, MoveUpStruct* mvstruct, Node* pos1, Node* p
   }
   pos3 = pos2->parent;
   if ((!IsIn(pos3, mvstruct) && (!pos1->flag.compare_exchange_weak(expected, true)))) {
-    pos2->flag = pos1->flag = false;
+    pos2->flag = false;
+    pos1->flag = false;
     return false;
   }
   if (pos3 != pos2->parent) {
@@ -182,7 +197,9 @@ bool GetFlagsForMarkers(Node* start, MoveUpStruct* mvstruct, Node* pos1, Node* p
   }
   pos4 = pos3->parent;
   if ((!IsIn(pos4, mvstruct) && (!pos4->flag.compare_exchange_weak(expected, true)))) {
-    pos3->flag = pos2->flag = pos1->flag = false;
+    pos3->flag = false;
+    pos2->flag = false;
+    pos1->flag = false;
     return false;
   }
   if (pos4 != pos3->parent) {
@@ -193,9 +210,6 @@ bool GetFlagsForMarkers(Node* start, MoveUpStruct* mvstruct, Node* pos1, Node* p
   return true;
 }
 
-//mv struct is not passed in but is used. global? or add to RB?
-//figure out what pos1-4 is
-//figure out what PIDtoIgnore is and myPID
 bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
  
   Node* pos1 = startNode->parent;
@@ -215,7 +229,7 @@ bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
     return false;
   }
   if ((firstNew != pos4->parent) && 
-    (!SpacingRuleIsSatisfied(firstNew, startNode, PIDtoIgnore, mvstruct))){
+    (!SpacingRuleIsSatisfied(firstNew, startNode, mvstruct))){
     Node* releaseList[5] = { firstNew, pos4, pos3, pos2, pos1 };
     ReleaseFlags(mvstruct, false, releaseList, 5);
     return false;
@@ -230,7 +244,7 @@ bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
       return false;
     }
     if ((secondNew != firstNew->parent) &&
-      (!SpacingRuleIsSatisfied(secondNew, startNode, PIDtoIgnore, mvstruct))) {
+      (!SpacingRuleIsSatisfied(secondNew, startNode, mvstruct))) {
       Node* releaseList[6] = { secondNew, firstNew, pos4, pos3, pos2, pos1 };
       ReleaseFlags(mvstruct, false, releaseList, 6);
       return false;
@@ -254,7 +268,6 @@ bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
   return true;
 }
 
-//looks good
 bool ApplyMoveUpRule(Node* x, Node* w) {
   if (((w->marker == w->parent->marker) && (w->marker == w->right->marker) &&
     (w->marker != 0) && (w->left->marker != 0)) ||
@@ -270,6 +283,10 @@ bool ApplyMoveUpRule(Node* x, Node* w) {
 //looks good
 bool SetupLocalAreaForInsert(Node* curr) {
   Node* parentNode = curr->parent;
+  if (parent == NULL) {
+    return true;
+  }
+
   bool expected = false;
   if (!parentNode->flag.compare_exchange_weak(expected, true)) {
     return false;
@@ -290,14 +307,13 @@ bool SetupLocalAreaForInsert(Node* curr) {
     return false;
   }
 
-  if (!GetFlagsAndMarkersAbove(curr->parent, curr)) {
+  if (!GetFlagsAndMarkersAbove(curr->parent, 2)) {
     curr->parent->flag = uncleNode->flag = false;
     return false;
   }
   return true;
 }
 
-//needs local area code, getFlagsAndMarkersAbove is wrong
 bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
   Node* curr;
   if (successor->left->key != -1) {
@@ -362,7 +378,7 @@ bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
       return false;
     }
   }
-  if (!GetFlagsAndMarkersAbove(succParent, deletedNode)) {
+  if (!GetFlagsAndMarkersAbove(succParent, 1)) {
     curr->flag = false;
     siblingNode->flag = false;
     if (siblingNode->key == -1) {
@@ -374,6 +390,14 @@ bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
     }
     return false;
   }
+  mvstruct->nodeList.push_back(curr);
+  mvstruct->nodeList.push_back(siblingNode);
+  mvstruct->nodeList.push_back(succParent);
+  if (!(siblingNode->key == -1)) {
+    mvstruct->nodeList.push_back(leftNieceNode);
+    mvstruct->nodeList.push_back(rightNieceNode);
+  }
+
   return true;
 }
 
@@ -407,6 +431,12 @@ Node* MoveInserterUp(Node* oldNode) {
   }
   Node* releaseList[3] = { oldNode, oldParent, oldUncle };
   ReleaseFlags(mvstruct, true, releaseList, 3);
+
+  mvstruct->nodeList.push_back(newNode);
+  mvstruct->nodeList.push_back(newParent);
+  mvstruct->nodeList.push_back(newGrandParent);
+  mvstruct->nodeList.push_back(newUncle);
+
   return newNode;
 }
 
@@ -451,6 +481,16 @@ Node* MoveDeleterUp(Node* oldNode) {
   }
   Node* releaseList[4] = { oldNode, oldSibling, oldLeftNiece, oldRightNiece };
   ReleaseFlags(mvstruct, true, releaseList, 4);
+
+  newNode->parent->marker = -1;
+
+  mvstruct->nodeList.clear();
+  mvstruct->nodeList.push_back(newNode);
+  mvstruct->nodeList.push_back(newParent);
+  mvstruct->nodeList.push_back(newSibling);
+  mvstruct->nodeList.push_back(newLeftNiece);
+  mvstruct->nodeList.push_back(newRightNiece);
+
   return newNode;
 }
 
@@ -472,6 +512,13 @@ void fixupDeleteCase1(Node* x, Node* siblingNode) {
   siblingNode->right->flag = true;
 
   //new local area
+
+  mvstruct->nodeList.clear();
+  mvstruct->nodeList.push_back(x);
+  mvstruct->nodeList.push_back(x->parent);
+  mvstruct->nodeList.push_back(siblingNode);
+  mvstruct->nodeList.push_back(siblingNode->left);
+  mvstruct->nodeList.push_back(siblingNode->right);
 }
 
 void fixupDeleteCase3(Node* x, Node* siblingNode) {
@@ -485,7 +532,14 @@ void fixupDeleteCase3(Node* x, Node* siblingNode) {
   oldRightChild->flag = false;
 
   //new local area
+  mvstruct->nodeList.clear();
+  mvstruct->nodeList.push_back(x);
+  mvstruct->nodeList.push_back(x->parent);
+  mvstruct->nodeList.push_back(siblingNode);
+  mvstruct->nodeList.push_back(siblingNode->left);
+  mvstruct->nodeList.push_back(oldNode);
 }
+
 void fixupDeleteCase1_sym(Node* x, Node* siblingNode) {
   Node* oldNode = x->parent->parent;
   Node* oldLeftChild = x->parent->right_child;
@@ -504,6 +558,12 @@ void fixupDeleteCase1_sym(Node* x, Node* siblingNode) {
   siblingNode->right->flag = true;
 
   //new local area
+  mvstruct->nodeList.clear();
+  mvstruct->nodeList.push_back(x);
+  mvstruct->nodeList.push_back(x->parent);
+  mvstruct->nodeList.push_back(siblingNode);
+  mvstruct->nodeList.push_back(siblingNode->left);
+  mvstruct->nodeList.push_back(siblingNode->right);
 }
 
 void fixupDeleteCase3_sym(Node* x, Node* siblingNode) {
@@ -517,6 +577,12 @@ void fixupDeleteCase3_sym(Node* x, Node* siblingNode) {
   oldRightChild->flag = false;
 
   //new local area
+  mvstruct->nodeList.clear();
+  mvstruct->nodeList.push_back(x);
+  mvstruct->nodeList.push_back(x->parent);
+  mvstruct->nodeList.push_back(siblingNode);
+  mvstruct->nodeList.push_back(oldNode);
+  mvstruct->nodeList.push_back(siblingNode->right);
 }
 
 //private functions
@@ -556,7 +622,6 @@ void CASRBTree::rotateRight(Node*& root, Node*& curr) {
   curr->parent = leftNode;
 }
 
-//looks good
 void CASRBTree::fixupInsert(Node*& root, Node*& newNode) {
   Node* parentNode = nullptr;
   Node* grandParentNode = nullptr;
@@ -567,6 +632,9 @@ void CASRBTree::fixupInsert(Node*& root, Node*& newNode) {
 
     if (parentNode == grandParentNode->left) {
       Node* uncleNode = grandParentNode->right;
+
+      mvstruct->nodeList.push_back(uncleNode);
+      mvstruct->nodeList.push_back(grandParentNode);
 
       //If uncle is red, then recolor
       if (uncleNode != nullptr && uncleNode->color == false) {
@@ -797,9 +865,12 @@ void CASRBTree::insert(int key, int value) {
     Node* prevSearchNode = root->parent;
     Node* searchPtr = root;
     bool expected = false;
+
+    clearMoveUpStruct();
     while (!root->flag.compare_exchange_weak(expected, true));
     Node* newNode = new Node(key, value);
     
+
     while (searchPtr->key != -1) {
       prevSearchNode = searchPtr;
       if (newNode->key < searchPtr->key) {
@@ -838,6 +909,12 @@ void CASRBTree::insert(int key, int value) {
     newNode->right = new Node();
     newNode->color = false;
     fixupInsert(root, newNode);
+
+    for (int i = 0; i < mvstruct->nodeList.size(); i++) {
+      if (mvstruct->nodeList[i] != NULL) {
+        mvstruct->nodeList[i]->flag = false;
+      }
+    }
 }
 
 // utility function that deletes the node with given value 
