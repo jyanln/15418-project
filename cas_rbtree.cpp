@@ -1,83 +1,16 @@
+#include "cas_rbtree.hpp"
+#include "rbtree.hpp"
+#include <atomic>
+
 using namespace std;
 
-//This code is adapted from GeeksForGeeks
-struct Node
-{
-  int value;
-  //Red = False
-  //Black = True
-  bool color, flag;
-  int marker;
-  Node* left, * right, * parent;
-
-  Node(int value) {
-    this->value = value;
-    left = right = parent = nullptr;
-    this->color = false;
-    this->flag = false;
-    this->marker = -1;
-  }
-};
-
-struct MoveUpStruct
-{
-  Node** nodeList;
-  Node* goalNode;
-
-  MoveUpStruct(Node* goal) {
-    this->nodeList = nullptr;
-    goalNode = goal;
-  }
-};
-
-class RedBlackTree
-{
-private:
-  Node* root;
-protected:
-  void rotateLeft(Node*&, Node*&);
-  void rotateRight(Node*&, Node*&);
-  void fixupInsert(Node*&, Node*&);
-  void fixupDelete(Node* v);
-  void deleteNode(Node* x);
-public:
-  //Constructor
-  RedBlackTree() {
-    root = nullptr;
-  }
-  Node* search(int n);
-  Node* initializeTree();
-  void insertNode(const int& n);
-  void deleteByVal(int n);
-  void printLevelOrder();
-};
-
-Node* Successor(Node* x) {
-  if (x->left != nullptr && x->right != nullptr) {
-    Node* temp = x->right;
-    while (temp->left != nullptr) {
-      temp = temp->left;
-    }
-    return temp;
-  }
-  if (x->left == nullptr && x->right == nullptr) {
-    return nullptr;
-  }
-
-  if (x->left != nullptr) {
-    return x->left;
-  }
-  else {
-    return x->right;
-  }
-}
+//This code is adapted from Kim's Algorithm
 
 //LockFree CAS Helper functions
 //TODO: Figure out what moveupStruct is
 //      Fix ReleaseFlags structure
 //      Check correctness
-
-
+//      Make leaf nodes black NIL nodes, not null ptr
 
 /*
 To Fix: 
@@ -104,8 +37,42 @@ To Fix:
 
 */
 
-//this entire function is a mess
+//helper functions
 
+Node* Successor(Node* x) {
+  if (x->left != nullptr && x->right != nullptr) {
+    Node* temp = x->right;
+    while (temp->left != nullptr) {
+      temp = temp->left;
+    }
+    return temp;
+  }
+  if (x->left == nullptr && x->right == nullptr) {
+    return nullptr;
+  }
+
+  if (x->left != nullptr) {
+    return x->left;
+  }
+  else {
+    return x->right;
+  }
+}
+
+bool IsIn(Node* curr, MoveUpStruct* mvstruct) {
+  for (int i = 0; i < mvstruct->nodeList.size(); i++) {
+    if (curr == mvstruct->nodeList[i]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IsGoalNode(Node* curr, MoveUpStruct* mvstruct) {
+  return (curr == mvstruct->goalNode);
+}
+
+//figure out how to release unneeded flags
 void ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, int numNodes) {
   for (int i = 0; i < numNodes, i++) {
     if (success) {
@@ -113,7 +80,7 @@ void ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, i
         nodesToRelease[i]->flag = false;
       }
       else {
-        if (IsGoalNode(nd, moveUpStruct)) {
+        if (IsGoalNode(nd, mvstruct)) {
           //release unneeded flags in mvstruct and discard mvstruct
         }
       }
@@ -126,6 +93,7 @@ void ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, i
   }
 }
 
+//figure out where mvstruct comes from
 bool SpacingRuleIsSatisfied(Node* curr, Node* start, int PIDtoIgnore) {
   if (curr != start) {
     if (curr->marker != 0) {
@@ -134,7 +102,8 @@ bool SpacingRuleIsSatisfied(Node* curr, Node* start, int PIDtoIgnore) {
   }
   Node* parentNode = curr->parent;
   if (parentNode != start) {
-    if ((!IsIn(parentNode, mvstruct)) && (!parentNode->flag.compare_exchange_weak(false, true))) {
+    bool expected = false;
+    if ((!IsIn(parentNode, mvstruct)) && (!parentNode->flag.compare_exchange_weak(expected, true))) {
       return false;
     }
     if (parentNode != curr->parent) {
@@ -146,92 +115,117 @@ bool SpacingRuleIsSatisfied(Node* curr, Node* start, int PIDtoIgnore) {
       return false;
     }
   }
-  Node* siblingNode;
+  Node* siblingNode = nullptr;
   if (curr == parentNode->left) {
     siblingNode = parentNode->right;
   }
   else {
     siblingNode = parentNode->left;
   }
-  if ((!IsIn(ts, mvstruct)) && (!siblingNode->flag.compare_exchange_weak(false, true))) {
+  bool expected = false;
+  if ((!IsIn(siblingNode, mvstruct)) && (!siblingNode->flag.compare_exchange_weak(expected, true))) {
     if (parentNode != curr) {
-      ReleaseFlags(mvstruct, false, [parentNode], 1);
+      Node* releaseList[1] = { parentNode };
+      ReleaseFlags(mvstruct, false, releaseList, 1);
     }
     return false;
   }
   if ((siblingNode->marker != 0) && (siblingNode->marker != PIDtoIgnore)){
-    ReleaseFlags(mvstruct, false, [siblingNode], 1);
+    Node* releaseList[1] = { siblingNode };
+    ReleaseFlags(mvstruct, false, releaseList, 1);
     if (parentNode != curr) {
-      ReleaseFlags(mvstruct, false, [parentNode], 1);
+      Node* releaseList[1] = { parentNode };
+      ReleaseFlags(mvstruct, false, releaseList, 1);
     }
     return false;
   }
   if (parentNode != curr) {
-    ReleaseFlags(mvstruct, false, [siblingNode], 1);
+    Node* releaseList[1] = { parentNode };
+    ReleaseFlags(mvstruct, false, releaseList, 1);
+  }
+  Node* releaseList[1] = { siblingNode };
+  ReleaseFlags(mvstruct, false, releaseList, 1);
+  return true;
+}
+
+//looks good
+bool GetFlagsForMarkers(Node* start, MoveUpStruct* mvstruct, Node* pos1, Node* pos2, Node* pos3, Node* pos4) {
+  pos1 = start->parent;
+  bool expected = false;
+  if ((!IsIn(pos1, mvstruct) && (!pos1->flag.compare_exchange_weak(expected, true)))) {
+    return false;
+  }
+  if (pos1 != start->parent) {
+    Node* releaseList[1] = { pos1 };
+    ReleaseFlags(mvstruct, false, releaseList, 1);
+    return false;
+  }
+  pos2 = pos1->parent;
+  if ((!IsIn(pos2, mvstruct) && (!pos2->flag.compare_exchange_weak(expected, true)))) {
+    pos1->flag = false;
+    return false;
+  }
+  if (pos2 != pos1->parent) {
+    Node* releaseList[2] = { pos2, pos1 };
+    ReleaseFlags(mvstruct, false, releaseList, 2);
+    return false;
+  }
+  pos3 = pos2->parent;
+  if ((!IsIn(pos3, mvstruct) && (!pos1->flag.compare_exchange_weak(expected, true)))) {
+    pos2->flag = pos1->flag = false;
+    return false;
+  }
+  if (pos3 != pos2->parent) {
+    Node* releaseList[3] = { pos3, pos2, pos1 };
+    ReleaseFlags(mvstruct, false, releaseList, 3);
+    return false;
+  }
+  pos4 = pos3->parent;
+  if ((!IsIn(pos4, mvstruct) && (!pos4->flag.compare_exchange_weak(expected, true)))) {
+    pos3->flag = pos2->flag = pos1->flag = false;
+    return false;
+  }
+  if (pos4 != pos3->parent) {
+    Node* releaseList[4] = { pos4, pos3, pos2, pos1 };
+    ReleaseFlags(mvstruct, false, releaseList, 4);
+    return false;
   }
   return true;
 }
 
-bool GetFlagsForMarkers(Node* start, moveUpStruct* mvstruct, Node* pos1, Node* pos2, Node* pos3, Node* pos4) {
-  pos1 = start->parent;
-  if ((!IsIn(pos1, mvstruct) && (!pos1->flag.compare_exchange_weak(false, true)))) {
-    return false;
-  }
-  if (pos1 != start->parent) {
-    ReleaseFlags(mvstruct, false, [pos1], 1);
-    return false;
-  }
-  pos2 = pos1->parent;
-  if ((!IsIn(pos2, mvstruct) && (!pos2->flag.compare_exchange_weak(false, true)))) {
-    return false;
-  }
-  if (pos2 != pos1->parent) {
-    ReleaseFlags(mvstruct, false, [pos2], 1);
-    return false;
-  }
-  pos3 = pos2->parent;
-  if ((!IsIn(pos3, mvstruct) && (!pos3->flag.compare_exchange_weak(false, true)))) {
-    return false;
-  }
-  if (pos3 != pos2->parent) {
-    ReleaseFlags(mvstruct, false, [pos3], 1);
-    return false;
-  }
-  pos4 = pos3->parent;
-  if ((!IsIn(pos4, mvstruct) && (!pos4->flag.compare_exchange_weak(false, true)))) {
-    return false;
-  }
-  if (pos4 != pos3->parent) {
-    ReleaseFlags(mvstruct, false, [pos4], 1);
-    return false;
-  }
-}
-
+//mv struct is not passed in but is used. global? or add to RB?
+//figure out what pos1-4 is
+//figure out what PIDtoIgnore is and myPID
 bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
-  if (!GetFlagsForMarkers(start, mvstruct, pos1, pos2, pos3, pos4)) {
+  if (!GetFlagsForMarkers(startNode, mvstruct, pos1, pos2, pos3, pos4)) {
     return false;
   }
   Node* firstNew = pos4->parent;
-  if (!IsIn(firstNew, mvstruct) && (!firstNew->flag.compare_exchange_weak(false, true))) {
-    ReleaseFlags(mvstruct, false, [pos4, pos3, pos2, pos1], 4);
+  bool expected = false;
+  if (!IsIn(firstNew, mvstruct) && (!firstNew->flag.compare_exchange_weak(expected, true))) {
+    Node* releaseList[4] = { pos4, pos3, pos2, pos1 };
+    ReleaseFlags(mvstruct, false, releaseList, 4);
     return false;
   }
   if ((firstNew != pos4->parent) && 
-    (!SpacingRuleIsSatisfied(firstNew, start, PIDtoIgnore, mvstruct))){
-    ReleaseFlags(mvstruct, false, [firstNew, pos4, pos3, pos2, pos1], 5);
+    (!SpacingRuleIsSatisfied(firstNew, startNode, PIDtoIgnore, mvstruct))){
+    Node* releaseList[5] = { firstNew, pos4, pos3, pos2, pos1 };
+    ReleaseFlags(mvstruct, false, releaseList, 5);
     return false;
   }
 
   Node* secondNew = nullptr;
   if (numAdditional == 2) {
     secondNew = firstNew->parent;
-    if ((!IsIn(secondNew, mvstruct) && !secondNew->flag.compare_exchange_weak(false, true))) {
-      ReleaseFlags(mvstruct, false, [firstNew, pos4, pos3, pos2, pos1], 5);
+    if ((!IsIn(secondNew, mvstruct) && !secondNew->flag.compare_exchange_weak(expected, true))) {
+      Node* releaseList[5] = { firstNew, pos4, pos3, pos2, pos1 };
+      ReleaseFlags(mvstruct, false, releaseList, 5);
       return false;
     }
     if ((secondNew != firstNew->parent) &&
-      (!SpacingRuleIsSatisfied(secondNew, start, PIDtoIgnore, mvstruct))) {
-      ReleaseFlags(mvstruct, false, [secondNew, firstNew, pos4, pos3, pos2, pos1], 5);
+      (!SpacingRuleIsSatisfied(secondNew, startNode, PIDtoIgnore, mvstruct))) {
+      Node* releaseList[6] = { secondNew, firstNew, pos4, pos3, pos2, pos1 };
+      ReleaseFlags(mvstruct, false, releaseList, 6);
       return false;
     }
   }
@@ -240,12 +234,15 @@ bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
     secondNew->marker = myPID;
   }
 
-
-  if (numAdditional == 2) 
+  if (numAdditional == 2) {
+    Node* releaseList[1] = { secondNew };
     ReleaseFlags(mvstruct, true, [secondNew], 1);
-  ReleaseFlags(mvstruct, true, [firstnew, pos4, pos3], 3);
+  }
+  Node* releaseList[3] = { firstNew, pos4, pos3 };
+  ReleaseFlags(mvstruct, true, releaseList, 3);
   if (numAdditional == 1) {
-      ReleaseFlags(mvstruct, true, [pos2], 1);
+    Node* releaseList[1] = { pos2 };
+    ReleaseFlags(mvstruct, true, releaseList, 1);
   }
   return true;
 }
@@ -262,9 +259,11 @@ bool ApplyMoveUpRule(Node* x, Node* w) {
   }
 }
 
+//looks good
 bool SetupLocalAreaForInsert(Node* curr) {
   Node* parentNode = curr->parent;
-  if (!parentNode->flag.compare_exchange_weak(false, true)) {
+  bool expected = false;
+  if (!parentNode->flag.compare_exchange_weak(expected, true)) {
     return false;
   }
   if (parentNode != curr->parent) {
@@ -278,7 +277,7 @@ bool SetupLocalAreaForInsert(Node* curr) {
   else {
     uncleNode = curr->parent->left;
   }
-  if (!uncleNode->flag.compare_exchange_weak(false, true)) {
+  if (!uncleNode->flag.compare_exchange_weak(expected, true)) {
     curr->parent->flag = false;
     return false;
   }
@@ -290,26 +289,31 @@ bool SetupLocalAreaForInsert(Node* curr) {
   return true;
 }
 
+//looks good
 bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
   Node* curr;
-  if (successor->left != nullptr) {
+  if (successor->left->key != -1) {
     curr = successor->left;
   }
   else {
     curr = successor->right;
   }
 
-  if (!curr->flag.compare_exchange_weak(false, true)) {
+  bool expected = false;
+  if (!curr->flag.compare_exchange_weak(expected, true)) {
     return false;
   }
 
   Node* succParent = successor->parent;
-  if ((succParent != deletedNode) && (!succParent->flag.compare_exchange_weak(false, true))) {
+  if ((succParent != deletedNode) && (!succParent->flag.compare_exchange_weak(expected, true))) {
     curr->flag = false;
     return false;
   }
-  if (currParent != successor->parent) {
+  if (succParent != successor->parent) {
     curr->flag = false;
+    if (succParent != deletedNode) {
+      succParent->flag = false;
+    }
     return false;
   }
 
@@ -323,7 +327,7 @@ bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
 
   Node* leftNieceNode = siblingNode->left;
   Node* rightNieceNode = siblingNode->right;
-  if (!siblingNode->flag.compare_exchange_weak(false, true)) {
+  if (!siblingNode->flag.compare_exchange_weak(expected, true)) {
     curr->flag = false;
     if (succParent != deletedNode) {
       succParent->flag = false;
@@ -331,15 +335,15 @@ bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
     return false;
   }
 
-  if (siblingNode != nullptr) {
-    if (!leftNieceNode->flag.compare_exchange_weak(false, true)) {
+  if (siblingNode->key != -1) {
+    if (!leftNieceNode->flag.compare_exchange_weak(expected, true)) {
       curr->flag = siblingNode->flag = false;
       if (succParent != deletedNode) {
         succParent->flag = false;
       }
       return false;
     }
-    if (!rightNieceNode->flag.compare_exchange_weak(false, true)) {
+    if (!rightNieceNode->flag.compare_exchange_weak(expected, true)) {
       curr->flag = siblingNode->flag = false;
       if (succParent != deletedNode) {
         succParent->flag = false;
@@ -357,17 +361,19 @@ bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
   return true;
 }
 
+// needs mvstruct
 Node* MoveInserterUp(Node* oldNode) {
   Node* oldParent = oldNode->parent;
   Node* oldGrandParent = oldParent->parent;
   Node* oldUncle = nullptr;
-  if (oldParent == oldGrandParent->parent) {
+  if (oldParent == oldGrandParent->left) {
     oldUncle = oldGrandParent->right;
   }
   else {
     oldUncle = oldGrandParent->left;
   }
-  while (!GetFlagsAndMarkersAbove(oldgp, 2));
+  //extend intention markers from oldgp to top and 2 more
+  while (!GetFlagsAndMarkersAbove(oldGrandParent, 2));
   Node* newNode = oldGrandParent;
   Node* newParent = newNode->parent;
   Node* newGrandParent = newParent->parent;
@@ -378,13 +384,17 @@ Node* MoveInserterUp(Node* oldNode) {
   else {
     newUncle = newGrandParent->left;
   }
+
   if (!IsIn(newUncle, mvstruct)) {
-    while (!newUncle->flag.compare_exchange_weak(false, true));
+    bool expected = false;
+    while (!newUncle->flag.compare_exchange_weak(expected, true));
   }
-  ReleaseFlags(mvstruct, true, [oldNode, oldParent, oldUncle], 3);
+  Node* releaseList[3] = { oldNode, oldParent, oldUncle };
+  ReleaseFlags(mvstruct, true, releaseList, 3);
   return newNode;
 }
 
+// needs mvstruct
 Node* MoveDeleterUp(Node* oldNode) {
   Node* oldParent = oldNode->parent;
   Node* oldSibling = nullptr;
@@ -396,7 +406,7 @@ Node* MoveDeleterUp(Node* oldNode) {
   }
   Node* oldLeftNiece = oldSibling->left;
   Node* oldRightNiece = oldSibling->right;
-
+  Node* oldGrandParent = oldParent->parent;
   while (!GetFlagsAndMarkersAbove(oldGrandParent, 1));
 
   Node* newNode = oldNode;
@@ -409,55 +419,43 @@ Node* MoveDeleterUp(Node* oldNode) {
     newSibling = newParent->left;
   }
   if (!IsIn(newSibling, mvstruct)) {
-    while (!newSibling->flag.compare_exchange_weak(false, true));
+    bool expected = false;
+    while (!newSibling->flag.compare_exchange_weak(expected, true));
   }
 
   Node* newLeftNiece = newSibling->left;
   Node* newRightNiece = newSibling->right;
   if (!IsIn(newLeftNiece, mvstruct)) {
-    while (!newLeftNiece->flag.compare_exchange_weak(false, true));
+    bool expected = false;
+    while (!newLeftNiece->flag.compare_exchange_weak(expected, true));
   }
   if (!IsIn(newRightNiece, mvstruct)) {
-    while (!newRightNiece->flag.compare_exchange_weak(false, true));
+    bool expected = false;
+    while (!newRightNiece->flag.compare_exchange_weak(expected, true));
   }
-  ReleaseFlags(mvstruct, true, [oldNode, oldSibling, oldLeftNiece, oldRightNiece], 4);
+  Node* releaseList[4] = { oldNode, oldSibling, oldLeftNiece, oldRightNiece };
+  ReleaseFlags(mvstruct, true, releaseList, 4);
   return newNode;
 }
 
-Node* RedBlackTree::initializeTree() {
-  Node* root = new Node(0);
-  Node* dummy1 = new Node(0);
-  Node* dummy2 = new Node(0);
-  Node* dummy3 = new Node(0);
-  Node* dummy4 = new Node(0);
-  Node* dummy5 = new Node(0);
-  Node* dummySibling = new Node(0);
-  root->color = true;
-  dummy1->color = true;
-  dummy2->color = true;
-  dummy3->color = true;
-  dummy4->color = true;
-  dummy5->color = true;
-  dummySibling->color = true;
+void fixupDeleteCase1(Node* x) {
 
-  dummySibling->parent = root;
-  root->parent = dummy5;
-  dummy5->parent = dummy4;
-  dummy4->parent = dummy3;
-  dummy3->parent = dummy2;
-  dummy2->parent = dummy1;
-  
-  dummy1->left_child = dummy2;
-  dummy2->left_child = dummy3;
-  dummy3->left_child = dummy4;
-  dummy4->left_child = dummy5;
-  dummy5->left_child = root;
-  root->right_child = dummySibling;
-
-  return root;
 }
 
-void RedBlackTree::rotateLeft(Node*& root, Node*& curr) {
+void fixupDeleteCase3(Node* x) {
+
+}
+void fixupDeleteCase1_sym(Node* x) {
+
+}
+
+void fixupDeleteCase3_sym(Node* x) {
+
+}
+
+//private functions
+
+void CASRBTree::rotateLeft(Node*& root, Node*& curr) {
   Node* rightNode = curr->right;
   curr->right = rightNode->left;
   rightNode->left->parent = curr;
@@ -475,7 +473,7 @@ void RedBlackTree::rotateLeft(Node*& root, Node*& curr) {
   curr->parent = rightNode;
 }
 
-void RedBlackTree::rotateRight(Node*& root, Node*& curr) {
+void CASRBTree::rotateRight(Node*& root, Node*& curr) {
   Node* leftNode = curr->left;
   curr->left = leftNode->right;
   leftNode->right->parent = curr;
@@ -492,12 +490,12 @@ void RedBlackTree::rotateRight(Node*& root, Node*& curr) {
   curr->parent = leftNode;
 }
 
-void RedBlackTree::fixupInsert(Node*& root, Node*& newNode) {
+//looks good
+void CASRBTree::fixupInsert(Node*& root, Node*& newNode) {
   Node* parentNode = nullptr;
   Node* grandParentNode = nullptr;
 
-  while ((newNode != root) && (newNode->color != true) &&
-    (newNode->parent->color == false)) {
+  while (newNode->parent->color == false) {
     parentNode = newNode->parent;
     grandParentNode = parentNode->parent;
 
@@ -509,120 +507,52 @@ void RedBlackTree::fixupInsert(Node*& root, Node*& newNode) {
         grandParentNode->color = false;
         parentNode->color = true;
         uncleNode->color = true;
-        newNode = MoveInserterUp(x);
+        newNode = MoveInserterUp(newNode);
       }
       //otherwise, rotation neceassary
       else {
         if (newNode == parentNode->right) {
-          rotateLeft(root, parentNode);
-          newNode = parentNode;
-          parentNode = newNode->parent;
+          newNode = newNode->parent;
+          rotateLeft(root, newNode);
         }
-
-        rotateRight(root, parentNode);
-        bool tempColor = parentNode->color;
-        parentNode->color = grandParentNode->color;
-        grandParentNode->color = tempColor;
-        newNode = parentNode;
+        parentNode->color = true;
+        grandParentNode->color = false;
+        rotateRight(root, grandParentNode);
       }
     }
     else {
-      Node* uncleNode = parentNode->left;
+      Node* uncleNode = grandParentNode->left;
 
       //If uncle is red, then recolor
       if (uncleNode != nullptr && uncleNode->color == false) {
         grandParentNode->color = false;
         parentNode->color = true;
         uncleNode->color = true;
-        newNode = grandParentNode;
+        newNode = MoveInserterUp(newNode);
       }
       //otherwise, rotation is necesary
       else {
         if (newNode == parentNode->left) {
-          rotateRight(root, parentNode);
-          newNode = parentNode;
-          parentNode = newNode->parent;
+          newNode = newNode->parent;
+          rotateRight(root, newNode);
         }
-
+        parentNode->color = true;
+        grandParentNode->color = false;
         rotateLeft(root, grandParentNode);
-        bool tempColor = parentNode->color;
-        parentNode->color = grandParentNode->color;
-        grandParentNode->color = tempColor;
-        newNode = parentNode;
       }
     }
   }
   root->color = true;
 }
 
-//TODO: figure out restart and goto
-void RedBlackTree::insertNode(const int& value) {
-  //restart: prevSearcHNode = nullptr
-  Node* prevSearchNode = nullptr;
-
-  while (!root->flag.compare_exchange_weak(false, true));
-  Node* newNode = new Node(value);
-  Node* searchPtr = root;
-  
-  while (searchPtr != nullptr) {
-    prevSearchNode = searchPtr;
-    if (newNode->value < searchPtr->value) {
-      searchPtr = searchPtr->left;
-    }
-    else {
-      searchPtr = searchPtr->right;
-    }
-    if (!searchPtr->flag.compare_exchange_weak(false, true)) {
-      prevSearchNode->flag = false;
-      goto restart;
-    }
-    if (searchPtr != nullptr) {
-      prevSearchNode->flag = false;
-    }
-  }
-  newNode->flag = true;
-  if (!SetupLocalAreaForInsert(z)) {
-    prevSearchNode->flag = false;
-    goto restart;
-  }
-
-  newNode->parent = rootPtr;
-  if (prevSearchNode == null) {
-    root = newNode;
-  }
-  else if (newNode->value < rootPtr->value) {
-    prevSearchNode->left = newNode;
-  }
-  else {
-    prevSearchNode->right = newNode;
-  }
-  newNode->left = nullptr;
-  newNode->right = nullptr;
-  newNode->color = false;
-  fixupInsert(root, newNode);
-}
-
-void fixupDeleteCase1(Node* x) {
-
-}
-
-void fixupDeleteCase3(Node* x) {
-
-}
-void fixupDeleteCase1_sym(Node* x) {
-
-}
-
-void fixupDeleteCase3_sym(Node* x) {
-
-}
-void RedBlackTree::fixupDelete(Node* x) {
+//figure out how to release local areas and fix relocated markers
+void CASRBTree::fixupDelete(Node* x) {
   bool done = false;
   bool didMoveUp = false;
-  while (x != root && x->color == true) {
+  while (x != root && x->color == true && !done) {
     if (x == x->parent->left) {
       Node* siblingNode = x->parent->right;
-      if (siblingNode->color == true) {
+      if (siblingNode->color == false) {
         siblingNode->color = true;
         x->parent->color = false;
         rotateLeft(root, x->parent);
@@ -645,20 +575,20 @@ void RedBlackTree::fixupDelete(Node* x) {
         x->parent->color = true;
         siblingNode->right->color = true;
         rotateLeft(root, x - parent);
-        didMoveUp = applyMoveUpRule(x, siblingNode);
+        didMoveUp = ApplyMoveUpRule(x, siblingNode);
         done = true;
       }
     }
     else {
       Node* siblingNode = x->parent->left;
-      if (siblingNode->color == true) {
+      if (siblingNode->color == false) {
         siblingNode->color = true;
         x->parent->color = false;
         rotateRight(root, x->parent);
         siblingNode = x->parent->left;
         fixupDeleteCase1_sym(x, siblingNode);
       }
-      if (siblingNode->right->color == true && siblingNode->left > color == true) {
+      if (siblingNode->right->color == true && siblingNode->left->color == true) {
         siblingNode->color = red;
         x = MoveDeleterUp(x);
       }
@@ -679,15 +609,16 @@ void RedBlackTree::fixupDelete(Node* x) {
       }
     }
   }
-  if (!didMoveUP) {
+  if (!didMoveUp) {
    x->color = true;
    //release local area flags and fix relocated markers
   }
 }
 
-bool RedBlackTree::deleteNode(Node* v) {
+//figure out how to release local area
+bool CASRBTree::deleteNode(Node* v) {
   Node* u;
-  if (v->left == nullptr || v->right == nullptr) {
+  if (v->left->key == -1 || v->right->key == -1) {
     u = v;
   }
   else {
@@ -704,14 +635,14 @@ bool RedBlackTree::deleteNode(Node* v) {
   }
 
   Node* siblingNode;
-  if (u->left != nullptr) {
+  if (u->left->key != -1) {
     siblingNode = u->left;
   }
   else {
     siblingNode = u->right;
   }
   siblingNode->parent = u->parent;
-  if (u->parent == nullptr) {
+  if (u->parent == root->parent) {
     root = siblingNode;
   }
   else {
@@ -723,7 +654,7 @@ bool RedBlackTree::deleteNode(Node* v) {
     }
   }
   if (u != v) {
-    v->value = u->value;
+    v->key = u->key;
     v->flag = false;
   }
   if (u->color == true) {
@@ -735,16 +666,50 @@ bool RedBlackTree::deleteNode(Node* v) {
   return true;
 }
 
-Node* RedBlackTree::search(int n) {
+//need to update
+Node* CASRBTree::initializeTree() {
+  Node* root = new Node(0);
+  Node* dummy1 = new Node(0);
+  Node* dummy2 = new Node(0);
+  Node* dummy3 = new Node(0);
+  Node* dummy4 = new Node(0);
+  Node* dummy5 = new Node(0);
+  Node* dummySibling = new Node(0);
+  root->color = true;
+  dummy1->color = true;
+  dummy2->color = true;
+  dummy3->color = true;
+  dummy4->color = true;
+  dummy5->color = true;
+  dummySibling->color = true;
+
+  dummySibling->parent = root;
+  root->parent = dummy5;
+  dummy5->parent = dummy4;
+  dummy4->parent = dummy3;
+  dummy3->parent = dummy2;
+  dummy2->parent = dummy1;
+
+  dummy1->left_child = dummy2;
+  dummy2->left_child = dummy3;
+  dummy3->left_child = dummy4;
+  dummy4->left_child = dummy5;
+  dummy5->left_child = root;
+  root->right_child = dummySibling;
+
+  return root;
+}
+
+Node* CASRBTree::search(int key) {
   Node* temp = root;
   while (temp != NULL) {
-    if (n < temp->value) {
+    if (n < temp->key) {
       if (temp->left == NULL)
         break;
       else
         temp = temp->left;
     }
-    else if (n == temp->value) {
+    else if (n == temp->key) {
       break;
     }
     else {
@@ -758,48 +723,82 @@ Node* RedBlackTree::search(int n) {
   return temp;
 }
 
+//public functions
+
+//fix NIL nodes
+void CASRBTree::insert(int key, int value) {
+  restart:
+    Node* prevSearchNode = root->parent;
+    Node* searchPtr = root;
+    bool expected = false;
+    while (!root->flag.compare_exchange_weak(expected, true));
+    Node* newNode = new Node(key, value);
+    
+    while (searchPtr->key != -1) {
+      prevSearchNode = searchPtr;
+      if (newNode->key < searchPtr->key) {
+        searchPtr = searchPtr->left;
+      }
+      else {
+        searchPtr = searchPtr->right;
+      }
+      if (!searchPtr->flag.compare_exchange_weak(expected, true)) {
+        prevSearchNode->flag = false;
+        goto restart;
+      }
+      if (searchPtr->key != -1) {
+        prevSearchNode->flag = false;
+      }
+    }
+
+    newNode->flag = true;
+    if (!SetupLocalAreaForInsert(prevSearchNode)) {
+      prevSearchNode->flag = false;
+      goto restart;
+    }
+
+    newNode->parent = prevSearchNode;
+    if (prevSearchNode == root->parent) {
+      root = newNode;
+      root->parent->left = newNode;
+    }
+    else if (newNode->key < searchPtr->key) {
+      prevSearchNode->left = newNode;
+    }
+    else {
+      prevSearchNode->right = newNode;
+    }
+    newNode->left = new Node();
+    newNode->right = new Node();
+    newNode->color = false;
+    fixupInsert(root, newNode);
+}
+
 // utility function that deletes the node with given value 
-void RedBlackTree::deleteByVal(int n) {
+int CASRBTree::remove(int key) {
   if (root == NULL)
     // Tree is empty 
-    return;
+    return -1;
 
   Node* v = search(n);
 
-  if (v->value != n) {
-    cout << "No node found to delete with value:" << n << endl;
-    return;
+  if (v->key != key) {
+    return -1;
   }
-  mtx.lock();
-
-
+  int ret = v->val;
   deleteNode(v);
-  mtx.unlock();
+
+  return ret;
 }
 
-void RedBlackTree::printLevelOrder() {
-  if (root == NULL)
-    return;
+int CASRBTree::lookup(int key) {
+  Node* v = search(key);
 
-  std::queue<Node*> q;
-  q.push(root);
-
-  while (!q.empty())
-  {
-    Node* temp = q.front();
-    if (temp->color) {
-      cout << temp->value << "(BLACK)  ";
-    }
-    else {
-      cout << temp->value << "(RED)  ";
-    }
-    q.pop();
-
-    if (temp->left != NULL)
-      q.push(temp->left);
-
-    if (temp->right != NULL)
-      q.push(temp->right);
+  if (v && v->key == key) {
+    return v->val;
+  }
+  else {
+    return -1;
   }
 }
 
