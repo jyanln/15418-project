@@ -197,9 +197,16 @@ bool GetFlagsForMarkers(Node* start, MoveUpStruct* mvstruct, Node* pos1, Node* p
 //figure out what pos1-4 is
 //figure out what PIDtoIgnore is and myPID
 bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
+ 
+  Node* pos1 = startNode->parent;
+  Node* pos2 = pos1->parent;
+  Node* pos3 = pos2->parent;
+  Node* pos4 = pos3->parent;
+  
   if (!GetFlagsForMarkers(startNode, mvstruct, pos1, pos2, pos3, pos4)) {
     return false;
   }
+
   Node* firstNew = pos4->parent;
   bool expected = false;
   if (!IsIn(firstNew, mvstruct) && (!firstNew->flag.compare_exchange_weak(expected, true))) {
@@ -247,6 +254,7 @@ bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
   return true;
 }
 
+//looks good
 bool ApplyMoveUpRule(Node* x, Node* w) {
   if (((w->marker == w->parent->marker) && (w->marker == w->right->marker) &&
     (w->marker != 0) && (w->left->marker != 0)) ||
@@ -289,7 +297,7 @@ bool SetupLocalAreaForInsert(Node* curr) {
   return true;
 }
 
-//looks good
+//needs local area code, getFlagsAndMarkersAbove is wrong
 bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
   Node* curr;
   if (successor->left->key != -1) {
@@ -337,14 +345,17 @@ bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
 
   if (siblingNode->key != -1) {
     if (!leftNieceNode->flag.compare_exchange_weak(expected, true)) {
-      curr->flag = siblingNode->flag = false;
+      curr->flag = false;
+      siblingNode->flag = false;
       if (succParent != deletedNode) {
         succParent->flag = false;
       }
       return false;
     }
     if (!rightNieceNode->flag.compare_exchange_weak(expected, true)) {
-      curr->flag = siblingNode->flag = false;
+      curr->flag = false;
+      siblingNode->flag = false;
+      leftNieceNode->flag = false;
       if (succParent != deletedNode) {
         succParent->flag = false;
       }
@@ -352,7 +363,12 @@ bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
     }
   }
   if (!GetFlagsAndMarkersAbove(succParent, deletedNode)) {
-    curr->flag = siblingNode->flag = leftNieceNode->flag = leftNieceNode->flag = false;
+    curr->flag = false;
+    siblingNode->flag = false;
+    if (siblingNode->key == -1) {
+      leftNieceNode->flag = false;
+      rightNieceNode->flag = false;
+    }
     if (succParent != deletedNode) {
       succParent->flag = false;
     }
@@ -438,19 +454,69 @@ Node* MoveDeleterUp(Node* oldNode) {
   return newNode;
 }
 
-void fixupDeleteCase1(Node* x) {
+void fixupDeleteCase1(Node* x, Node* siblingNode) {
+  Node* oldNode = x->parent->parent;
+  Node* oldLeftChild = x->parent->right_child;
+  Node* oldRightChild = x->parent->left_child;
 
+  if (oldNode->marker != -1 && oldNode->marker == oldLeftChild->marker) {
+    x->parent->marker = oldNode->marker;
+  }
+
+  oldNode->marker = myPID;
+  oldNode->flag = false;
+  oldRightChild->flag = false;
+  oldNode->parent->parent->parent->parent->marker = -1;
+
+  siblingNode->left->flag = true;
+  siblingNode->right->flag = true;
+
+  //new local area
 }
 
-void fixupDeleteCase3(Node* x) {
+void fixupDeleteCase3(Node* x, Node* siblingNode) {
+  Node* oldNode = siblingNode->right;
+  Node* oldRightChild = oldNode->right;
 
+  //clear all markers within local area
+
+
+  siblingNode->left->flag = true;
+  oldRightChild->flag = false;
+
+  //new local area
 }
-void fixupDeleteCase1_sym(Node* x) {
+void fixupDeleteCase1_sym(Node* x, Node* siblingNode) {
+  Node* oldNode = x->parent->parent;
+  Node* oldLeftChild = x->parent->right_child;
+  Node* oldRightChild = x->parent->left_child;
 
+  if (oldNode->marker != -1 && oldNode->marker == oldRightChild->marker) {
+    x->parent->marker = oldNode->marker;
+  }
+
+  oldNode->marker = myPID;
+  oldNode->flag = false;
+  oldRightChild->flag = false;
+  oldNode->parent->parent->parent->parent->marker = -1;
+
+  siblingNode->left->flag = true;
+  siblingNode->right->flag = true;
+
+  //new local area
 }
 
-void fixupDeleteCase3_sym(Node* x) {
+void fixupDeleteCase3_sym(Node* x, Node* siblingNode) {
+  Node* oldNode = siblingNode->left;
+  Node* oldRightChild = oldNode->left;
 
+  //clear all markers within local area
+
+
+  siblingNode->right->flag = true;
+  oldRightChild->flag = false;
+
+  //new local area
 }
 
 //private functions

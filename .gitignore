@@ -56,14 +56,4 @@ dkms.conf
 
 # Python caches
 *.pyc
-.vs/15418-project/v16/Browse.VC.db
-.vs/15418-project/v16/Browse.VC.opendb
-.vs/15418-project/v16/ipch/AutoPCH/cc2f5f8ef3cc2d78/LOCKFREE_CAS_RB.ipch
-.vs/ProjectSettings.json
-.vs/slnx.sqlite
-.vs/15418-project/v16/.suo
-.vs/15418-project/v16/ipch/AutoPCH/7c131d201f00cbd3/TREE.ipch
-.vs/15418-project/v16/ipch/AutoPCH/c2d73cea45a96902/UTILS.ipch
-.vs/15418-project/v16/ipch/AutoPCH/e11339f4f739beaa/LOCKFREE_UTILS.ipch
-.vs/VSWorkspaceState.json
-.vs/15418-project/v16/ipch/AutoPCH/647ac350b44cecd6/CAS_RBTREE.ipch
+.vs/*
