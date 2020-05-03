@@ -23,7 +23,7 @@ bool synced = false;
 int main(int argc, char* argv[]) {
     // Parse arguments
     char c;
-    while((c = getopt(argc, argv, "crt:")) != -1) {
+    while((c = getopt(argc, argv, "cr:t:")) != -1) {
         switch(c) {
             case 'c':
                 correctness = true;
@@ -132,45 +132,59 @@ int main(int argc, char* argv[]) {
 
 void benchmark(RBTree* rbtree, const Test& test, double* times) {
     std::vector<std::thread> threads;
+    double min_times[6];
     double thread_times[num_threads * 3];
 
-    // Launch threads
-    for(int i = 0; i < num_threads; i++) {
-        threads.push_back(std::thread(benchmark_thread, rbtree, test,
-                &thread_times[i * 3]));
-    }
-
-    // Wait for threads to finish
-    for(int i = 0; i < num_threads; i++) {
-        threads[i].join();
-    }
-
-    // Calculate and store stats
-    for(int j = 0; j < 3; j++) {
-        // Average
-        double avg = 0;
-        // Maximum
-        double max = thread_times[j];
-
+    for(int r = 0; r < num_repetitions; r++) {
+        // Launch threads
         for(int i = 0; i < num_threads; i++) {
-            avg += thread_times[i * 3 + j];
-            max = max < thread_times[i * 3 + j] ?
-                thread_times[i * 3 + j] : max;
+            threads.push_back(std::thread(benchmark_thread, i, rbtree, test,
+                        &thread_times[i * 3]));
         }
 
-        avg /= num_threads;
+        // Wait for threads to finish
+        for(int i = 0; i < num_threads; i++) {
+            threads[i].join();
+        }
+        threads.clear();
 
-        times[j * 2] = avg;
-        times[j * 2 + 1] = max;
+        // Calculate and store stats
+        for(int j = 0; j < 3; j++) {
+            // Average
+            double avg = 0;
+            // Maximum
+            double max = thread_times[j];
+
+            for(int i = 0; i < num_threads; i++) {
+                avg += thread_times[i * 3 + j];
+                max = max < thread_times[i * 3 + j] ?
+                    thread_times[i * 3 + j] : max;
+            }
+
+            avg /= num_threads;
+
+            if(r == 0 || avg < min_times[j * 2]) {
+                min_times[j * 2] = avg;
+                min_times[j * 2 + 1] = max;
+            }
+        }
+    }
+
+    // Copy min times
+    for(int i = 0; i < 6; i++) {
+        times[i] = min_times[i];
     }
 }
 
-void benchmark_thread(RBTree* tree, const Test& test, double* times) {
+void benchmark_thread(const int& thread, RBTree* tree, const Test& test,
+        double* times) {
     // Data to calculate average
     int num[3] = {0, 0, 0};
     double avg[3] = {0, 0, 0};
 
-    for(Op op : test.ops) {
+    for(size_t i = thread; i < test.ops.size(); i += num_threads) {
+        Op op = test.ops[i];
+
         auto start = std::chrono::steady_clock::now();
 
         switch(op.type) {

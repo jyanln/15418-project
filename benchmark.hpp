@@ -56,6 +56,7 @@ class Test {
 
 void benchmark(RBTree* tree, const Test& test, double* times);
 
-void benchmark_thread(RBTree* tree, const Test& test, double* times);
+void benchmark_thread(const int& thread, RBTree* tree, const Test& test,
+        double* times);
 
 #endif // BENCHMARK_H
