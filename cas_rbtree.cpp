@@ -7,55 +7,22 @@ using namespace std;
 //This code is adapted from Kim's Algorithm
 
 //LockFree CAS Helper functions
-//TODO: Figure out what moveupStruct is
-//      Fix ReleaseFlags structure
-//      Check correctness
-//      Make leaf nodes black NIL nodes, not null ptr
-
-/*
-To Fix: 
-1) On initialization empty tree should have:
-      6 dummy ancester nodes
-      1 dummy sibling to the NIL root (all black)
-2) Fix checks with nullptr to dummy node checks (incorrect assumption)
-
-3) Figure out moveupStruct which does:
-      pg 19:
-      Both routines check (using the IsIn
-      routine on the moveUpStruct) whether or not a node whose flag is to be acquired has been inherited from
-      another process via the Move-Up rule
-
-      set in the ApplyMoveUpRule (Figure 31)
-
-      contains nodes and if it is in the moveupstruct, the flag doesnt need to be acquired
-
-      moveupstruct contains a goal node which identifies which, when reached, allows another process ot move up
-      Also done by release flags
-
-4) Write IsIn and IsGoalNode and FixupCase1 and FixupCase3
-
-
-*/
 
 //helper functions
-thread_local MoveUpStruct* mvstruct = new MoveUpStruct();
+thread_local CasRBTree::MoveUpStruct* mvstruct = new CasRBTree::MoveUpStruct();
 thread_local long myPID;
-
-void threadInit(long i) {
-  myPID = i;
-}
 
 void clearMoveUpStruct() {
   if (mvstruct->nodeList.size() == 0) {
     return;
   }
-  for (int i = 0; i < mvstruct->nodeList.size(); i++) {
+  for (size_t i = 0; i < mvstruct->nodeList.size(); i++) {
     mvstruct->nodeList[i]-> flag = false;
   }
   mvstruct->nodeList.clear();
 }
 
-Node* Successor(Node* x) {
+CasRBTree::Node* CasRBTree::Successor(Node* x) {
   if (x->left != nullptr && x->right != nullptr) {
     Node* temp = x->right;
     while (temp->left != nullptr) {
@@ -75,8 +42,8 @@ Node* Successor(Node* x) {
   }
 }
 
-bool IsIn(Node* curr, MoveUpStruct* mvstruct) {
-  for (int i = 0; i < mvstruct->nodeList.size(); i++) {
+bool CasRBTree::IsIn(Node* curr, MoveUpStruct* mvstruct) {
+  for (size_t i = 0; i < mvstruct->nodeList.size(); i++) {
     if (curr == mvstruct->nodeList[i]) {
       return true;
     }
@@ -84,18 +51,18 @@ bool IsIn(Node* curr, MoveUpStruct* mvstruct) {
   return false;
 }
 
-bool IsGoalNode(Node* curr, MoveUpStruct* mvstruct) {
+bool CasRBTree::IsGoalNode(Node* curr, MoveUpStruct* mvstruct) {
   return (curr == mvstruct->goalNode);
 }
 
-void ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, int numNodes) {
-  for (int i = 0; i < numNodes, i++) {
+void CasRBTree::ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, int numNodes) {
+  for (int i = 0; i < numNodes; i++) {
     if (success) {
       if (!IsIn(nodesToRelease[i], mvstruct)) {
         nodesToRelease[i]->flag = false;
       }
       else {
-        if (IsGoalNode(nd, mvstruct)) {
+        if (IsGoalNode(nodesToRelease[i], mvstruct)) {
           //release unneeded flags in mvstruct and discard mvstruct
           clearMoveUpStruct();
         }
@@ -109,7 +76,7 @@ void ReleaseFlags(MoveUpStruct* mvstruct, bool success, Node** nodesToRelease, i
   }
 }
 
-bool SpacingRuleIsSatisfied(Node* curr, Node* start, MoveUpStruct* mvstruct) {
+bool CasRBTree::SpacingRuleIsSatisfied(Node* curr, Node* start, MoveUpStruct* mvstruct) {
   if (curr != start) {
     if (curr->marker != 0) {
       return false;
@@ -163,7 +130,7 @@ bool SpacingRuleIsSatisfied(Node* curr, Node* start, MoveUpStruct* mvstruct) {
   return true;
 }
 
-bool GetFlagsForMarkers(Node* start, MoveUpStruct* mvstruct, Node* pos1, Node* pos2, Node* pos3, Node* pos4) {
+bool CasRBTree::GetFlagsForMarkers(Node* start, MoveUpStruct* mvstruct, Node* pos1, Node* pos2, Node* pos3, Node* pos4) {
   pos1 = start->parent;
   bool expected = false;
   if ((!IsIn(pos1, mvstruct) && (!pos1->flag.compare_exchange_weak(expected, true)))) {
@@ -210,7 +177,7 @@ bool GetFlagsForMarkers(Node* start, MoveUpStruct* mvstruct, Node* pos1, Node* p
   return true;
 }
 
-bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
+bool CasRBTree::GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
  
   Node* pos1 = startNode->parent;
   Node* pos2 = pos1->parent;
@@ -257,7 +224,7 @@ bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
 
   if (numAdditional == 2) {
     Node* releaseList[1] = { secondNew };
-    ReleaseFlags(mvstruct, true, [secondNew], 1);
+    ReleaseFlags(mvstruct, true, releaseList, 1);
   }
   Node* releaseList[3] = { firstNew, pos4, pos3 };
   ReleaseFlags(mvstruct, true, releaseList, 3);
@@ -268,7 +235,7 @@ bool GetFlagsAndMarkersAbove(Node* startNode, int numAdditional) {
   return true;
 }
 
-bool ApplyMoveUpRule(Node* x, Node* w) {
+bool CasRBTree::ApplyMoveUpRule(Node* x, Node* w) {
   if (((w->marker == w->parent->marker) && (w->marker == w->right->marker) &&
     (w->marker != 0) && (w->left->marker != 0)) ||
     ((w->marker == w->right->marker) && (w->marker != 0) && (w->left->marker != 0)) ||
@@ -276,14 +243,14 @@ bool ApplyMoveUpRule(Node* x, Node* w) {
     return true;
   }
   else {
-    false;
+    return false;
   }
 }
 
 //looks good
-bool SetupLocalAreaForInsert(Node* curr) {
+bool CasRBTree::SetupLocalAreaForInsert(Node* curr) {
   Node* parentNode = curr->parent;
-  if (parent == NULL) {
+  if (parentNode == NULL) {
     return true;
   }
 
@@ -314,7 +281,7 @@ bool SetupLocalAreaForInsert(Node* curr) {
   return true;
 }
 
-bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
+bool CasRBTree::SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
   Node* curr;
   if (successor->left->key != -1) {
     curr = successor->left;
@@ -402,7 +369,7 @@ bool SetupLocalAreaForDelete(Node* successor, Node* deletedNode) {
 }
 
 // needs mvstruct
-Node* MoveInserterUp(Node* oldNode) {
+CasRBTree::Node* CasRBTree::MoveInserterUp(Node* oldNode) {
   Node* oldParent = oldNode->parent;
   Node* oldGrandParent = oldParent->parent;
   Node* oldUncle = nullptr;
@@ -441,7 +408,7 @@ Node* MoveInserterUp(Node* oldNode) {
 }
 
 // needs mvstruct
-Node* MoveDeleterUp(Node* oldNode) {
+CasRBTree::Node* CasRBTree::MoveDeleterUp(Node* oldNode) {
   Node* oldParent = oldNode->parent;
   Node* oldSibling = nullptr;
   if (oldNode == oldParent->left) {
@@ -494,10 +461,10 @@ Node* MoveDeleterUp(Node* oldNode) {
   return newNode;
 }
 
-void fixupDeleteCase1(Node* x, Node* siblingNode) {
+void CasRBTree::fixupDeleteCase1(Node* x, Node* siblingNode) {
   Node* oldNode = x->parent->parent;
-  Node* oldLeftChild = x->parent->right_child;
-  Node* oldRightChild = x->parent->left_child;
+  Node* oldLeftChild = x->parent->right;
+  Node* oldRightChild = x->parent->left;
 
   if (oldNode->marker != -1 && oldNode->marker == oldLeftChild->marker) {
     x->parent->marker = oldNode->marker;
@@ -521,7 +488,7 @@ void fixupDeleteCase1(Node* x, Node* siblingNode) {
   mvstruct->nodeList.push_back(siblingNode->right);
 }
 
-void fixupDeleteCase3(Node* x, Node* siblingNode) {
+void CasRBTree::fixupDeleteCase3(Node* x, Node* siblingNode) {
   Node* oldNode = siblingNode->right;
   Node* oldRightChild = oldNode->right;
 
@@ -540,10 +507,10 @@ void fixupDeleteCase3(Node* x, Node* siblingNode) {
   mvstruct->nodeList.push_back(oldNode);
 }
 
-void fixupDeleteCase1_sym(Node* x, Node* siblingNode) {
+void CasRBTree::fixupDeleteCase1_sym(Node* x, Node* siblingNode) {
   Node* oldNode = x->parent->parent;
-  Node* oldLeftChild = x->parent->right_child;
-  Node* oldRightChild = x->parent->left_child;
+  //Node* oldLeftChild = x->parent->right;
+  Node* oldRightChild = x->parent->left;
 
   if (oldNode->marker != -1 && oldNode->marker == oldRightChild->marker) {
     x->parent->marker = oldNode->marker;
@@ -566,7 +533,7 @@ void fixupDeleteCase1_sym(Node* x, Node* siblingNode) {
   mvstruct->nodeList.push_back(siblingNode->right);
 }
 
-void fixupDeleteCase3_sym(Node* x, Node* siblingNode) {
+void CasRBTree::fixupDeleteCase3_sym(Node* x, Node* siblingNode) {
   Node* oldNode = siblingNode->left;
   Node* oldRightChild = oldNode->left;
 
@@ -587,7 +554,7 @@ void fixupDeleteCase3_sym(Node* x, Node* siblingNode) {
 
 //private functions
 
-void CASRBTree::rotateLeft(Node*& root, Node*& curr) {
+void CasRBTree::rotateLeft(Node*& root, Node*& curr) {
   Node* rightNode = curr->right;
   curr->right = rightNode->left;
   rightNode->left->parent = curr;
@@ -605,7 +572,7 @@ void CASRBTree::rotateLeft(Node*& root, Node*& curr) {
   curr->parent = rightNode;
 }
 
-void CASRBTree::rotateRight(Node*& root, Node*& curr) {
+void CasRBTree::rotateRight(Node*& root, Node*& curr) {
   Node* leftNode = curr->left;
   curr->left = leftNode->right;
   leftNode->right->parent = curr;
@@ -622,7 +589,7 @@ void CASRBTree::rotateRight(Node*& root, Node*& curr) {
   curr->parent = leftNode;
 }
 
-void CASRBTree::fixupInsert(Node*& root, Node*& newNode) {
+void CasRBTree::fixupInsert(Node*& root, Node*& newNode) {
   Node* parentNode = nullptr;
   Node* grandParentNode = nullptr;
 
@@ -680,7 +647,7 @@ void CASRBTree::fixupInsert(Node*& root, Node*& newNode) {
 }
 
 //figure out how to release local areas and fix relocated markers
-void CASRBTree::fixupDelete(Node* x) {
+void CasRBTree::fixupDelete(Node* x) {
   bool done = false;
   bool didMoveUp = false;
   while (x != root && x->color == true && !done) {
@@ -694,7 +661,7 @@ void CASRBTree::fixupDelete(Node* x) {
         fixupDeleteCase1(x, siblingNode);
       }
       if (siblingNode->left->color == true && siblingNode->right->color == true) {
-        siblingNode->color = red;
+        siblingNode->color = false;
         x = MoveDeleterUp(x);
       }
       else {
@@ -708,7 +675,7 @@ void CASRBTree::fixupDelete(Node* x) {
         siblingNode->color = x->parent->color;
         x->parent->color = true;
         siblingNode->right->color = true;
-        rotateLeft(root, x - parent);
+        rotateLeft(root, x ->parent);
         didMoveUp = ApplyMoveUpRule(x, siblingNode);
         done = true;
       }
@@ -723,7 +690,7 @@ void CASRBTree::fixupDelete(Node* x) {
         fixupDeleteCase1_sym(x, siblingNode);
       }
       if (siblingNode->right->color == true && siblingNode->left->color == true) {
-        siblingNode->color = red;
+        siblingNode->color = false;
         x = MoveDeleterUp(x);
       }
       else {
@@ -737,7 +704,7 @@ void CASRBTree::fixupDelete(Node* x) {
         siblingNode->color = x->parent->color;
         x->parent->color = true;
         siblingNode->left->color = true;
-        rotateRight(root, x - parent);
+        rotateRight(root, x ->parent);
         didMoveUp = ApplyMoveUpRule(x, siblingNode);
         done = true;
       }
@@ -750,7 +717,7 @@ void CASRBTree::fixupDelete(Node* x) {
 }
 
 //figure out how to release local area
-bool CASRBTree::deleteNode(Node* v) {
+bool CasRBTree::deleteNode(Node* v) {
   Node* u;
   if (v->left->key == -1 || v->right->key == -1) {
     u = v;
@@ -800,50 +767,16 @@ bool CASRBTree::deleteNode(Node* v) {
   return true;
 }
 
-//need to update
-Node* CASRBTree::initializeTree() {
-  Node* root = new Node(0);
-  Node* dummy1 = new Node(0);
-  Node* dummy2 = new Node(0);
-  Node* dummy3 = new Node(0);
-  Node* dummy4 = new Node(0);
-  Node* dummy5 = new Node(0);
-  Node* dummySibling = new Node(0);
-  root->color = true;
-  dummy1->color = true;
-  dummy2->color = true;
-  dummy3->color = true;
-  dummy4->color = true;
-  dummy5->color = true;
-  dummySibling->color = true;
-
-  dummySibling->parent = root;
-  root->parent = dummy5;
-  dummy5->parent = dummy4;
-  dummy4->parent = dummy3;
-  dummy3->parent = dummy2;
-  dummy2->parent = dummy1;
-
-  dummy1->left_child = dummy2;
-  dummy2->left_child = dummy3;
-  dummy3->left_child = dummy4;
-  dummy4->left_child = dummy5;
-  dummy5->left_child = root;
-  root->right_child = dummySibling;
-
-  return root;
-}
-
-Node* CASRBTree::search(int key) {
+CasRBTree::Node* CasRBTree::search(int key) {
   Node* temp = root;
   while (temp != NULL) {
-    if (n < temp->key) {
+    if (key < temp->key) {
       if (temp->left == NULL)
         break;
       else
         temp = temp->left;
     }
-    else if (n == temp->key) {
+    else if (key == temp->key) {
       break;
     }
     else {
@@ -860,7 +793,7 @@ Node* CASRBTree::search(int key) {
 //public functions
 
 //fix NIL nodes
-void CASRBTree::insert(int key, int value) {
+int CasRBTree::insert(int key, int value) {
   restart:
     Node* prevSearchNode = root->parent;
     Node* searchPtr = root;
@@ -910,20 +843,22 @@ void CASRBTree::insert(int key, int value) {
     newNode->color = false;
     fixupInsert(root, newNode);
 
-    for (int i = 0; i < mvstruct->nodeList.size(); i++) {
+    for (size_t i = 0; i < mvstruct->nodeList.size(); i++) {
       if (mvstruct->nodeList[i] != NULL) {
         mvstruct->nodeList[i]->flag = false;
       }
     }
+
+    return -1;
 }
 
 // utility function that deletes the node with given value 
-int CASRBTree::remove(int key) {
+int CasRBTree::remove(int key) {
   if (root == NULL)
     // Tree is empty 
     return -1;
 
-  Node* v = search(n);
+  Node* v = search(key);
 
   if (v->key != key) {
     return -1;
@@ -934,7 +869,7 @@ int CASRBTree::remove(int key) {
   return ret;
 }
 
-int CASRBTree::lookup(int key) {
+int CasRBTree::lookup(int key) {
   Node* v = search(key);
 
   if (v && v->key == key) {
@@ -943,38 +878,4 @@ int CASRBTree::lookup(int key) {
   else {
     return -1;
   }
-}
-
-int main()
-{
-  RedBlackTree test1;
-
-  cout << "Test 1 : Insertion and Deletion \n";
-
-  test1.insertNode(1);
-  test1.insertNode(2);
-  test1.insertNode(3);
-  test1.printLevelOrder();
-  cout << "\n";
-  test1.deleteByVal(1);
-  test1.deleteByVal(2);
-  test1.deleteByVal(3);
-  test1.printLevelOrder();
-  cout << "\n";
-
-  RedBlackTree test2;
-
-  cout << "\nTest 2 : Deleting Non Existing Values \n";
-  test2.insertNode(7);
-  test2.insertNode(6);
-  test2.insertNode(9);
-  test2.insertNode(4);
-  test2.printLevelOrder();
-  cout << "\n";
-  test2.deleteByVal(4);
-  test2.deleteByVal(7);
-  test2.deleteByVal(9);
-  test2.deleteByVal(4);
-  test2.deleteByVal(6);
-  test2.printLevelOrder();
 }

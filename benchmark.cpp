@@ -2,6 +2,7 @@
 
 #include "rbtree.hpp"
 #include "mutex_rbtree.hpp"
+#include "cas_rbtree.hpp"
 
 #include <thread>
 #include <chrono>
@@ -13,6 +14,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <iostream>
 
 // Flags
 int num_threads = 2;
@@ -102,22 +104,19 @@ int main(int argc, char* argv[]) {
     // Benchmark each test
     for(int i = 0; i < num_tests; i++) {
         printf("Benchmarking test [%s]\n", tests[i].filename.c_str());
-        std::string rb_names[NUM_RB_IMPL];
         double times[NUM_RB_IMPL * 6];
+
+        RBTree* trees[NUM_RB_IMPL] = {new MutexRBTree(), new CasRBTree()};
+
         for(int impl = 0; impl < NUM_RB_IMPL; impl++) {
-            //TODO choose which type of tree
-            RBTree* tree = new MutexRBTree();
-
-            rb_names[impl] = tree->name();
-
-            benchmark(tree, tests[i], &times[impl * 6]);
+            benchmark(trees[impl], tests[i], &times[impl * 6]);
         }
 
         // Print results
         printf("Implementation\tAvg insert\tWorst insert\tAvg remove\tWorst remove\tAvg lookup\tWorst lookup\n");
         for(int impl = 0; impl < NUM_RB_IMPL; impl++) {
             printf("%s\t%.2f\t\t%.2f\t\t%.2f\t\t%.2f\t\t%.2f\t\t%.2f\n",
-                    rb_names[impl].c_str(),
+                    trees[impl]->name().c_str(),
                     times[impl * 6],
                     times[impl * 6 + 1],
                     times[impl * 6 + 2],
