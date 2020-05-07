@@ -30,6 +30,6 @@ class RBTree {
 };
 
 //TODO
-#define NUM_RB_IMPL 1
+#define NUM_RB_IMPL 2
 
 #endif // RBTREE_HPP
